@@ -1,7 +1,8 @@
 'use strict';
 const { rpc, DbError } = require('../lib/supabase');
 const T = require('../lib/telegram');
-const { notifyAdmins, dmUser, displayName } = require('../lib/notify');
+const { notifyAdmins, dmKey, purgeSeen, isMaintenance, settings, displayName } = require('../lib/notify');
+const I18N = require('../public/i18n.js');
 
 const esc = T.escapeHtml;
 const stars = (n) => Number(n).toLocaleString('tr-TR') + ' ⭐';
@@ -55,8 +56,11 @@ async function setup(req, res) {
       secret_token: secret,
       allowed_updates: ['message', 'pre_checkout_query'],
     });
-    await T.tg('setChatMenuButton', { menu_button: { type: 'web_app', text: 'Mağaza', web_app: { url: base + '/' } } });
-    await T.tg('setMyCommands', { commands: [{ command: 'start', description: 'Mağazayı aç' }] });
+    await T.tg('setChatMenuButton', { menu_button: { type: 'web_app', text: 'EasyCheats', web_app: { url: base + '/' } } });
+    await T.tg('setMyCommands', { commands: [{ command: 'start', description: I18N.format('en', 'bot.cmd') }] });
+    for (const l of ['tr', 'ru']) {
+      await T.tg('setMyCommands', { commands: [{ command: 'start', description: I18N.format(l, 'bot.cmd') }], language_code: l });
+    }
     const info = await T.tg('getWebhookInfo', {});
     const me = await T.getMe();
     return send(res, 200, {
@@ -122,7 +126,7 @@ async function successfulPayment(m) {
   if (r && r.credited) {
     const name = displayName(from);
     await Promise.all([
-      dmUser(from.id, '💰 <b>Bakiye yüklendi</b>\n' + stars(r.amount) + ' hesabına eklendi.\nYeni bakiyen: ' + stars(r.balance)),
+      dmKey(from.id, 'dm.deposit_ok', { amt: stars(r.amount), bal: stars(r.balance) }),
       notifyAdmins('💰 <b>Yeni yükleme</b>\n👤 ' + esc(name) + (from.username ? ' (@' + esc(from.username) + ')' : '') + ' · <code>' + from.id + '</code>\n⭐ ' + stars(r.amount)),
     ]);
   }
@@ -136,15 +140,28 @@ async function onText(m, req) {
     if (r) ref = r[1].toUpperCase();
   }
   let support = 'easycheatsupport';
+  let maint = false;
   try {
-    const s = await rpc('public_settings');
+    const s = await settings();
     if (s && s.support_username) support = s.support_username;
+    maint = s && s.maintenance === true;
   } catch (e) { /* varsayılan */ }
 
+  // Kullanıcı bota yazdı = bildirimleri gördü: görüldü işaretle, süresi dolanları sil
+  try { await rpc('mark_bot_seen', { p_user_id: m.from.id }); await purgeSeen(m.from.id); } catch (e) { /* yoksay */ }
+
+  const lang = I18N.pick(m.from && m.from.language_code) || 'en';
   const base = T.baseUrl(req);
-  const text = '👋 <b>EasyCheats Store</b>\'a hoş geldin!\nMağazayı açmak için aşağıdaki düğmeye dokun.\n\nDestek: @' + esc(support);
+  if (maint) {
+    // Bakım modu: mağaza düğmesi yok, "Bize Ulaş" var
+    await T.sendMessage(m.chat.id, I18N.format(lang, 'bot.maint', { support: esc(support) }), {
+      reply_markup: { inline_keyboard: [[{ text: I18N.format(lang, 'bot.support'), url: 'https://t.me/' + support }]] },
+    });
+    return;
+  }
+  const text = I18N.format(lang, 'bot.welcome', { support: esc(support) });
   const extra = base
-    ? { reply_markup: { inline_keyboard: [[{ text: '🛍 Mağazayı aç', web_app: { url: base + '/' + (ref ? '?ref=' + encodeURIComponent(ref) : '') } }]] } }
+    ? { reply_markup: { inline_keyboard: [[{ text: I18N.format(lang, 'bot.open'), web_app: { url: base + '/' + (ref ? '?ref=' + encodeURIComponent(ref) : '') } }]] } }
     : {};
   await T.sendMessage(m.chat.id, text, extra);
 }

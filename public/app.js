@@ -2,6 +2,8 @@
   'use strict';
   var TG = (window.Telegram && window.Telegram.WebApp) || null;
   var INIT = (TG && TG.initData) || '';
+  var I = window.I18N;
+  var L = I.t;                       // L('anahtar', {param: değer})
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
   var fmt = function (n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.'); };
@@ -21,6 +23,12 @@
   var logo = function (s) { return '<svg class="logo" width="' + s + '" height="' + s + '" viewBox="0 0 40 40" aria-hidden="true"><use href="#logo"/></svg>'; };
   var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   var EASE = 'cubic-bezier(.22,1,.36,1)';
+  var wide = function () { return !!(window.matchMedia && window.matchMedia('(min-width:1024px)').matches); };
+
+  /* ---------- yumuşak, kalın, renkli ikon kutuları ---------- */
+  var COL = { blue: '#5ea1ff', orange: '#ff9f43', green: '#3fd68f', gold: '#f6c244', purple: '#a78bfa', pink: '#ff6fa8', red: '#ff6b6b', teal: '#2dd4bf', cyan: '#38bdf8', slate: '#94a3b8' };
+  function tile(fa, col, cls) { return '<span class="tile ' + (cls || '') + '" style="--c:' + (COL[col] || col) + '" aria-hidden="true"><i class="' + fa + '"></i></span>'; }
+  function ptitle(fa, col, text, cls) { return '<div class="ptitle ' + (cls || '') + '">' + tile(fa, col, 'lg') + '<h1 class="h1">' + esc(text) + '</h1></div>'; }
 
   /* ---------- hareket yardımcıları (Web Animations API) ---------- */
   function play(el, frames, opts) {
@@ -32,8 +40,8 @@
     Array.prototype.forEach.call(list, function (el, i) {
       if (!el.animate) return;
       el.animate(
-        [{ opacity: 0, transform: 'translate3d(0,16px,0)' }, { opacity: 1, transform: 'translate3d(0,0,0)' }],
-        { duration: 620, delay: Math.min(i, 8) * 50, easing: EASE, fill: 'backwards' }
+        [{ opacity: 0, transform: 'translate3d(0,14px,0)' }, { opacity: 1, transform: 'translate3d(0,0,0)' }],
+        { duration: 480, delay: Math.min(i, 6) * 40, easing: EASE, fill: 'backwards' }
       );
     });
   }
@@ -81,12 +89,37 @@
       '<path class="gbow" d="M47 98c-22-22-44-14-32 0 8 9 24 6 32 0zM47 98c22-22 44-14 32 0-8 9-24 6-32 0z"/></g></g></svg>';
   }
 
+  /* ---------- dil ---------- */
+  var LOC = { tr: 'tr-TR', en: 'en-GB', ru: 'ru-RU' };
+  function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function tgUserLang() {
+    var u = TG && TG.initDataUnsafe && TG.initDataUnsafe.user;
+    return u ? I.pick(u.language_code) : null;
+  }
+  // Önce kullanıcının elle seçtiği dil, yoksa Telegram dili. İkisi de yoksa null (seçtirilir).
+  function resolveLang() { return I.pick(lsGet('eac-lang')) || tgUserLang(); }
+  function applyStatic() {
+    $$('[data-i18n]').forEach(function (el) { el.textContent = L(el.getAttribute('data-i18n')); });
+    $$('[data-i18n-aria]').forEach(function (el) { el.setAttribute('aria-label', L(el.getAttribute('data-i18n-aria'))); });
+  }
+  function applyLang(l) {
+    I.setLang(l);
+    document.documentElement.lang = l;
+    applyStatic();
+  }
+  function errText(code) {
+    if (code === 'bad_init_data' || code === 'bad_signature') code = 'session';
+    var k = 'err.' + code;
+    return I.has(k) ? L(k) : L('err.generic');
+  }
+
   /* ---------- tema ---------- */
   var THEMES = [
-    { id: 'mono', name: 'Siyah Beyaz', bg: '#0a0a0a', s: '#272727', a: '#ffffff' },
-    { id: 'purple', name: 'Siyah Mor', bg: '#0a0a0a', s: '#272727', a: '#8e7ee9' },
-    { id: 'blue', name: 'Siyah Mavi', bg: '#0a0a0a', s: '#272727', a: '#4d8ff0' },
-    { id: 'green', name: 'Siyah Yeşil', bg: '#0a0a0a', s: '#272727', a: '#2bb57a' }
+    { id: 'mono', bg: '#0a0a0a', s: '#272727', a: '#ffffff' },
+    { id: 'purple', bg: '#0a0a0a', s: '#272727', a: '#8e7ee9' },
+    { id: 'blue', bg: '#0a0a0a', s: '#272727', a: '#4d8ff0' },
+    { id: 'green', bg: '#0a0a0a', s: '#272727', a: '#2bb57a' }
   ];
   function themeById(id) { return THEMES.filter(function (t) { return t.id === id; })[0] || THEMES[0]; }
   function syncMeta(id) {
@@ -98,11 +131,12 @@
   var state = {
     view: 'catalog', tab: 'all', product: null, tariff: null, quote: null, promoCode: '',
     balance: 0, theme: document.documentElement.getAttribute('data-theme') || 'mono',
-    sheet: null, paying: false, paid: null, need: null, depositing: false, booted: false,
-    me: null, admin: false, products: [], settings: {}, tx: [], purchases: [], notes: [], unread: 0,
+    sheet: null, paying: false, paid: null, need: null, depositing: false, booted: false, maint: false,
+    me: null, admin: false, products: [], settings: {}, txs: [], purchases: [], notes: [], unread: 0,
     ref: { count: 0, earned: 0 }, invite: null, bot: null, custom: null
   };
   var view = $('#view'), sheet = $('#sheet'), scrim = $('#scrim'), toastEl = $('#toast');
+  var catHash = '', i18nHash = '', dirtyView = false, langCb = null, tgDone = false;
 
   function applyTheme(id) {
     if (id === 'mono') document.documentElement.removeAttribute('data-theme');
@@ -110,7 +144,7 @@
     state.theme = id;
     syncMeta(id);
     $$('.theme-opt', sheet).forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-arg') === id)); });
-    try { localStorage.setItem('eac-theme', id); } catch (e) {}
+    lsSet('eac-theme', id);
   }
   function setTheme(id) {
     if (id === state.theme) return;
@@ -136,10 +170,10 @@
         document.body.appendChild(ta); ta.select();
         var ok = document.execCommand('copy');
         document.body.removeChild(ta);
-        toast(ok ? 'Kopyalandı' : 'Seçip elle kopyala');
-      } catch (e) { toast('Seçip elle kopyala'); }
+        toast(ok ? L('copied') : L('copy_manual'));
+      } catch (e) { toast(L('copy_manual')); }
     }
-    try { navigator.clipboard.writeText(text).then(function () { toast('Kopyalandı'); }, fallback); } catch (e) { fallback(); }
+    try { navigator.clipboard.writeText(text).then(function () { toast(L('copied')); }, fallback); } catch (e) { fallback(); }
   }
   function haptic(kind) {
     try {
@@ -158,17 +192,30 @@
   }
   function dateStr(iso) {
     var d = new Date(iso);
-    return isNaN(d) ? '' : d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+    return isNaN(d) ? '' : d.toLocaleDateString(LOC[I.getLang()], { day: 'numeric', month: 'short' });
   }
   function dateTime(iso) {
     var d = new Date(iso);
-    return isNaN(d) ? '' : d.toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return isNaN(d) ? '' : d.toLocaleString(LOC[I.getLang()], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
   function supportName() { return (state.settings && state.settings.support_username) || 'easycheatsupport'; }
   function fullName() {
     var u = state.me || {};
     var n = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
-    return n || (u.username ? '@' + u.username : 'Kullanıcı');
+    return n || (u.username ? '@' + u.username : L('pro.user'));
+  }
+  function pct(n) { return L('pct', { n: n }); }
+
+  /* ---------- profil fotoğrafı (Telegram) ---------- */
+  function avatarUrl() {
+    var tu = TG && TG.initDataUnsafe && TG.initDataUnsafe.user;
+    return (tu && tu.photo_url) || (state.me && state.me.photo_url) || '';
+  }
+  function avatarHtml() {
+    var url = avatarUrl();
+    var ch = fullName().replace(/^@/, '').charAt(0) || '?';
+    return '<div class="avatar"><span class="av-i">' + esc(ch) + '</span>' +
+      (url ? '<img src="' + esc(url) + '" alt="" referrerpolicy="no-referrer" decoding="async" draggable="false" onerror="this.remove()">' : '') + '</div>';
   }
 
   /* ---------- API ---------- */
@@ -176,6 +223,7 @@
     var payload = {};
     Object.keys(body || {}).forEach(function (k) { payload[k] = body[k]; });
     payload.op = op;
+    var isAdm = op.indexOf('admin.') === 0;
     return fetch('/api', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'tma ' + INIT },
@@ -183,34 +231,67 @@
     }).then(function (r) {
       return r.json().then(function (j) { return { r: r, j: j }; }, function () { return { r: r, j: null }; });
     }, function () {
-      var e = new Error('İnternet bağlantını kontrol et.'); e.code = 'network'; throw e;
+      var e = new Error(L('err.network')); e.code = 'network'; throw e;
     }).then(function (x) {
       if (x.j && x.j.ok) return x.j.data;
-      var e = new Error((x.j && x.j.message) || 'Bir sorun oluştu, tekrar dene.');
-      e.code = x.j && x.j.error; e.status = x.r.status;
+      var code = x.j && x.j.error;
+      // Yönetici işlemlerinde sunucunun ayrıntılı (Türkçe) mesajı gösterilir; kullanıcıya kendi dilinde mesaj.
+      var e = new Error(isAdm && x.j && x.j.message ? x.j.message : errText(code));
+      e.code = code; e.status = x.r.status;
       if (x.r.status === 401 && state.booted) renderGate('error', e.message);
+      if (code === 'user_banned' && (state.booted || state.maint)) { state.booted = false; state.maint = false; setTimeout(boot, 0); }
       throw e;
     });
   }
 
+  /* ---------- sunucu verisi ---------- */
+  var TXK = { deposit: 'tx.deposit', refund: 'tx.refund', referral: 'tx.referral', referral_reversal: 'tx.ref_rev', deposit_refund: 'tx.dep_refund' };
   function applyMe(me) {
     state.me = me.user; state.balance = me.user.balance; state.admin = !!me.user.is_admin;
     state.purchases = me.orders || [];
-    state.tx = (me.transactions || []).map(function (t) {
-      return { type: t.amount > 0 ? 'in' : 'out', title: t.title, amount: Math.abs(t.amount), date: dateStr(t.created_at) };
-    });
+    state.txs = me.transactions || [];
     state.notes = me.notifications || []; state.unread = me.unread || 0;
     state.ref = me.referral || { count: 0, earned: 0 };
   }
+  // Veritabanında Türkçe saklanan sistem bildirimlerini kullanıcının diline çevir.
+  function noteView(n) {
+    var b = n.body || '', m;
+    if (n.title === 'Bakiye yüklendi' && (m = /^(\d+) /.exec(b))) return { t: L('nt.m.dep.t'), b: L('nt.m.dep.b', { n: fmt(+m[1]) }) };
+    if (n.title === 'Davet kazancı' && (m = /^(\d+) /.exec(b))) return { t: L('nt.m.ref.t'), b: L('nt.m.ref.b', { n: fmt(+m[1]) }) };
+    if (n.title === 'Siparişin tamamlandı' && (m = /^(.*) siparişin tamamlandı\.$/.exec(b))) return { t: L('nt.m.done.t'), b: L('nt.m.done.b', { p: m[1] }) };
+    if (n.title === 'Siparişin iade edildi' && (m = /^(\d+) /.exec(b))) return { t: L('nt.m.rf.t'), b: L('nt.m.rf.b', { n: fmt(+m[1]) }) };
+    return { t: n.title, b: b };
+  }
+  function txTitle(x) { return TXK[x.type] ? L(TXK[x.type]) : x.title; }
+
+  function sigMe() { return JSON.stringify([state.purchases, state.balance, state.unread, state.txs.length, state.notes.length]); }
   var refreshing = false;
   function refreshMe() {
-    if (refreshing || !state.booted) return Promise.resolve();
+    if (refreshing || !INIT || (!state.booted && !state.maint)) return Promise.resolve();
     refreshing = true;
-    var sig = JSON.stringify([state.purchases, state.balance, state.unread, state.tx.length]);
-    return api('refresh').then(function (r) {
-      refreshing = false; applyMe(r.me);
-      if (sig !== JSON.stringify([state.purchases, state.balance, state.unread, state.tx.length])) repaint();
+    var sig = sigMe();
+    return api('refresh', { ch: catHash, ih: i18nHash }).then(function (r) {
+      refreshing = false;
+      applyMe(r.me);
+      var relang = false, catChanged = false;
+      if (r.i18n) { I.setOverrides(r.i18n); relang = true; }
+      i18nHash = r.ih;
+      if (r.catalog) { state.products = r.catalog.products || []; catChanged = true; }
+      catHash = r.ch;
+      applySettings(r.settings || {});
+      if (!state.booted) return;
+      if (relang) { applyStatic(); if (state.sheet) dirtyView = true; else mount(); }
+      else if (catChanged) { if (state.sheet || state.view !== 'catalog') dirtyView = state.view === 'catalog'; else mount(); }
+      else if (sig !== sigMe()) repaint();
     }, function () { refreshing = false; });
+  }
+  // Ayarlar canlı izlenir: bakım modu açılınca ekran anında değişir, kapanınca mağaza geri gelir.
+  function applySettings(s) {
+    var was = state.settings.maintenance === true, now = s.maintenance === true;
+    state.settings = s;
+    if (now && !state.admin && state.booted) { state.booted = false; state.maint = true; renderGate('maintenance'); }
+    else if (!now && state.maint) { state.maint = false; boot(); }
+    else if (state.booted && state.admin && was !== now && !state.sheet && (state.view === 'catalog' || state.view === 'profile')) mount();
   }
   function repaint() {
     var v = state.view;
@@ -229,61 +310,77 @@
     }
   }
 
+  /* ---------- bildirimler: görüldü → 15 sn sonra silinir ---------- */
+  var purgeT;
+  function schedulePurge() {
+    clearTimeout(purgeT);
+    if (!INIT) return;
+    purgeT = setTimeout(function () { api('purge').then(function () { return refreshMe(); }, function () {}); }, 15500);
+  }
+  function markSeen() {
+    if (!INIT || !state.booted) return;
+    api('seen').then(schedulePurge, function () {});
+  }
+
   /* ---------- ürün / fiyat ---------- */
   function product() { return state.products.filter(function (p) { return p.id === state.product; })[0] || null; }
-  function tariff() { var p = product(); return p ? (p.tariffs.filter(function (t) { return t.id === state.tariff; })[0] || null) : null; }
-  function defaultTariff(p) { return (p.tariffs.filter(function (t) { return t.tag === 'Popüler'; })[0] || p.tariffs[0]).id; }
-  function minPrice(p) { return Math.min.apply(null, p.tariffs.map(function (t) { return t.price; })); }
+  function tariff() { var p = product(); return p ? (p.tariffs.filter(function (x) { return x.id === state.tariff; })[0] || null) : null; }
+  function defaultTariff(p) { return (p.tariffs.filter(function (x) { return x.tag === 'Popüler'; })[0] || p.tariffs[0]).id; }
+  function minPrice(p) { return Math.min.apply(null, p.tariffs.map(function (x) { return x.price; })); }
   function priceNow() {
-    var t = tariff(); if (!t) return 0;
+    var tr = tariff(); if (!tr) return 0;
     var q = state.quote;
-    return (q && q.tariff_id === t.id) ? q.final_price : t.price;
+    return (q && q.tariff_id === tr.id) ? q.final_price : tr.price;
   }
 
   /* ---------- katalog ---------- */
   function headerHtml(actions) {
     return '<header class="top"><div class="brand"><span class="brand-name" aria-label="EasyCheats"><b class="b1" aria-hidden="true">Easy</b><b class="b2" aria-hidden="true">Cheats</b></span></div>' +
       (actions ? '<div class="top-actions">' +
-        '<button class="icon-btn" data-action="toast" data-arg="Dil: Türkçe" aria-label="Dil">' + ico('i-lang') + '</button>' +
-        '<button class="icon-btn" id="bell" data-action="open-notes" aria-label="Bildirimler">' + ico('i-bell') + (state.unread > 0 ? '<i class="dot"></i>' : '') + '</button>' +
+        '<button class="icon-btn" data-action="open-lang" aria-label="' + esc(L('hdr.lang')) + '">' + ico('i-lang') + '</button>' +
+        '<button class="icon-btn" id="bell" data-action="open-notes" aria-label="' + esc(L('hdr.notes')) + '">' + ico('i-bell') + (state.unread > 0 ? '<i class="dot"></i>' : '') + '</button>' +
         '</div>' : '') + '</header>';
   }
+  function maintBanner() {
+    return state.admin && state.settings.maintenance === true ? '<div class="mt-banner">' + ico('fa-solid fa-screwdriver-wrench') + '<span>' + esc(L('mt.admin')) + '</span></div>' : '';
+  }
   function productCard(p) {
-    var mp = minPrice(p);
-    return '<article class="pcard cat-item" data-action="open-product" data-arg="' + esc(p.id) + '" tabindex="0" role="button" aria-label="' + esc(p.name) + ', ' + fmt(mp) + ' yıldızdan başlayan fiyatlarla. Tarifeleri aç">' +
+    var mp = minPrice(p), pre = L('card.pre'), post = L('card.post');
+    return '<article class="pcard cat-item" data-action="open-product" data-arg="' + esc(p.id) + '" tabindex="0" role="button" aria-label="' + esc(L('card.aria', { name: p.name, price: fmt(mp) })) + '">' +
       (p.image_url
         ? '<img class="pcard-img" src="' + esc(p.image_url) + '" alt="' + esc(p.name) + '" loading="eager" decoding="async" draggable="false">'
         : '<div class="pimg">' + artFlow(true) + '</div>') +
-      '<div class="pcap"><strong>' + esc(p.name) + '</strong><span class="pcap-sub"><span class="pr">' + st(mp) + '</span><em>dan başlayan fiyatlarla</em></span></div></article>';
+      '<div class="pcap"><strong>' + esc(p.name) + '</strong><span class="pcap-sub">' + (pre ? '<em>' + esc(pre) + '</em>' : '') + '<span class="pr">' + st(mp) + '</span>' + (post ? '<em>' + esc(post) + '</em>' : '') + '</span></div></article>';
   }
   function catalogView() {
-    return headerHtml(true) +
+    var c = L('cat.hero.c');
+    return headerHtml(true) + maintBanner() +
       '<section class="hero cat-item">' +
       '<svg class="hero-stripes" viewBox="0 0 985 522" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="gStripe" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--stripe-a)"/><stop offset="1" style="stop-color:var(--stripe-b)"/></linearGradient></defs>' +
       '<polygon points="482,522 797,0 935,0 622,522" fill="url(#gStripe)"/><polygon points="962,0 985,0 985,522 649,522" fill="url(#gStripe)"/></svg>' +
       '<img class="hero-soldier" src="https://shop.cry4me.best/img/hero.webp" alt="" decoding="async" draggable="false">' +
-      '<h2>Kendi<br><span class="accent">tarifeni</span> seç</h2><p>Anahtar, sipariş onaylanınca görünür.</p></section>' +
-      (state.products.length ? state.products.map(productCard).join('') :
-        '<div class="empty cat-item">' + ico('i-star') + '<h3>Şu an ürün yok</h3><p>Yeni ürünler çok yakında burada olacak.</p></div>');
+      '<h2>' + esc(L('cat.hero.a')) + '<br><span class="accent">' + esc(L('cat.hero.b')) + '</span>' + (c ? ' ' + esc(c) : '') + '</h2><p>' + esc(L('cat.hero.sub')) + '</p></section>' +
+      (state.products.length ? '<div class="pgrid">' + state.products.map(productCard).join('') + '</div>' :
+        '<div class="empty cat-item">' + ico('i-star') + '<h3>' + esc(L('cat.empty.t')) + '</h3><p>' + esc(L('cat.empty.p')) + '</p></div>');
   }
 
   /* ---------- satın alımlar ---------- */
   function buyCard(p) {
-    var pill = p.status === 'completed' ? '<span class="pill on">Aktif</span>'
-      : p.status === 'pending' ? '<span class="pill wait">Bekliyor</span>'
-      : '<span class="pill" style="background:var(--surface-3);color:var(--muted)">İade edildi</span>';
+    var pill = p.status === 'completed' ? '<span class="pill on">' + esc(L('st.active')) + '</span>'
+      : p.status === 'pending' ? '<span class="pill wait">' + esc(L('st.pending')) + '</span>'
+      : '<span class="pill" style="background:var(--surface-3);color:var(--muted)">' + esc(L('st.refunded')) + '</span>';
     var body;
     if (p.status === 'completed') {
       body = (p.license_key
-        ? '<div class="key" data-action="copy" data-arg="' + esc(p.license_key) + '" role="button" tabindex="0" aria-label="Anahtarı kopyala" title="Kopyalamak için dokun"><code>' + esc(p.license_key) + '</code></div>' +
+        ? '<div class="key" data-action="copy" data-arg="' + esc(p.license_key) + '" role="button" tabindex="0" aria-label="' + esc(L('buy.copy_key')) + '" title="' + esc(L('buy.tap_copy')) + '"><code>' + esc(p.license_key) + '</code></div>' +
           (p.admin_note ? '<p class="muted">' + esc(p.admin_note) + '</p>' : '') +
-          '<button class="btn-ghost" data-action="open-activate">Nasıl etkinleştirilir</button>'
-        : '<p class="muted">' + esc(p.admin_note || 'Siparişin tamamlandı.') + '</p>');
+          '<button class="btn-ghost" data-action="open-activate">' + esc(L('buy.howto')) + '</button>'
+        : '<p class="muted">' + esc(p.admin_note || L('buy.done')) + '</p>');
     } else if (p.status === 'pending') {
-      body = '<p class="muted">Siparişin alındı. Destek, Telegram üzerinden seninle iletişime geçecek.</p>' +
-        '<button class="btn-ghost" data-action="check" data-arg="' + p.id + '">Durumu kontrol et</button>';
+      body = '<p class="muted">' + esc(L('buy.pending_text')) + '</p>' +
+        '<button class="btn-ghost" data-action="check" data-arg="' + p.id + '">' + esc(L('buy.check')) + '</button>';
     } else {
-      body = '<p class="muted">Tutar bakiyene iade edildi.' + (p.admin_note ? ' ' + esc(p.admin_note) : '') + '</p>';
+      body = '<p class="muted">' + esc(L('buy.refunded_text')) + (p.admin_note ? ' ' + esc(p.admin_note) : '') + '</p>';
     }
     return '<article class="buy" data-id="' + p.id + '"><div class="buy-top"><div class="thumb">' + artFlow(true) + '</div>' +
       '<div class="buy-info"><h3>' + esc(p.product_name) + '</h3><p><span>' + esc(p.tariff_label) + '</span><span>·</span>' + st(p.price) + '<span>·</span><span>' + dateStr(p.created_at) + '</span></p></div>' + pill + '</div>' + body + '</article>';
@@ -297,7 +394,7 @@
   function listHtml() {
     var list = filtered();
     return list.length ? list.map(buyCard).join('') :
-      '<div class="empty">' + ico('i-receipt') + '<h3>Burada henüz bir şey yok</h3><p>Katalogdan bir tarife seç, siparişin bu listede görünür.</p><button class="btn-ghost" data-action="nav" data-arg="catalog">Kataloğa git</button></div>';
+      '<div class="empty">' + ico('i-receipt') + '<h3>' + esc(L('buy.empty.t')) + '</h3><p>' + esc(L('buy.empty.p')) + '</p><button class="btn-ghost" data-action="nav" data-arg="catalog">' + esc(L('buy.empty.btn')) + '</button></div>';
   }
   function counts() {
     var all = state.purchases;
@@ -317,11 +414,11 @@
   function purchasesView() {
     var c = counts();
     var tab = function (id, label) {
-      return '<button role="tab" data-action="tab" data-arg="' + id + '" aria-selected="' + (state.tab === id) + '">' + label + '<span class="count" data-count="' + id + '">' + c[id] + '</span></button>';
+      return '<button role="tab" data-action="tab" data-arg="' + id + '" aria-selected="' + (state.tab === id) + '">' + esc(label) + '<span class="count" data-count="' + id + '">' + c[id] + '</span></button>';
     };
     var k = ['all', 'active', 'pending'].indexOf(state.tab);
-    return '<h1 class="h1">Satın Alımlarım</h1>' +
-      '<div class="seg" role="tablist" id="seg" style="--k:' + k + '"><span class="knob"></span>' + tab('all', 'Tümü') + tab('active', 'Aktif') + tab('pending', 'Bekleyen') + '</div>' +
+    return ptitle('fa-solid fa-receipt', 'orange', L('buy.title')) +
+      '<div class="seg" role="tablist" id="seg" style="--k:' + k + '"><span class="knob"></span>' + tab('all', L('tab.all')) + tab('active', L('tab.active')) + tab('pending', L('tab.pending')) + '</div>' +
       '<div class="list" id="plist">' + listHtml() + '</div>';
   }
   function setTab(id) {
@@ -335,20 +432,27 @@
 
   /* ---------- profil ---------- */
   function refRate() { var r = state.settings.referral_rate_percent; return r == null ? 25 : r; }
+  function rowBtn(action, arg, fa, col, label, sub) {
+    return '<button class="row" data-action="' + action + '"' + (arg ? ' data-arg="' + arg + '"' : '') + '>' + tile(fa, col) +
+      '<span class="grow">' + esc(label) + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</span>' + ico('i-chev', 'chev') + '</button>';
+  }
   function profileView() {
     var u = state.me || {};
-    var row = function (action, label) {
-      return '<button class="row" data-action="' + (action === 'wallet' ? 'nav" data-arg="wallet' : action) + '"><span class="grow">' + label + '</span>' + ico('i-chev', 'chev') + '</button>';
-    };
-    var adminRow = state.admin
-      ? '<button class="row" data-action="nav" data-arg="admin"><span class="grow">Yönetici paneli<small>Siparişler, kullanıcılar, ayarlar</small></span>' + ico('i-chev', 'chev') + '</button>' : '';
-    return '<h1 class="h1">Profil</h1>' +
-      '<section class="pro"><div class="pro-top"><div class="avatar">' + logo(60) + '</div><div style="min-width:0"><h2>' + esc(fullName()) + '</h2><p>' + (u.username ? '@' + esc(u.username) : 'ID: ' + esc(u.id)) + '</p></div></div>' +
-      '<div class="pro-id"><div class="bal"><span class="bal-ico">' + STAR + '</span><div><strong id="bal-num">' + fmt(state.balance) + '</strong><span class="bal-lbl">Bakiye</span></div></div>' +
-      '<button class="chip-btn" data-action="nav" data-arg="wallet">' + ico('i-plus') + 'Yükle</button></div></section>' +
-      '<section class="invite">' + artGift() + '<h2>Arkadaşlarını davet et, <em>%' + refRate() + '</em> kazan</h2><p>Arkadaşının her alışverişinden</p>' +
-      '<button class="pill-btn" data-action="open-invite">Arkadaş davet et ' + ico('i-chev') + '</button></section>' +
-      '<div class="rows">' + adminRow + row('wallet', 'Cüzdan') + row('open-support', 'Destek') + row('open-activate', 'Nasıl etkinleştirilir') + row('open-faq', 'Sık sorulan sorular') + row('open-terms', 'Kullanıcı sözleşmesi') + row('open-settings', 'Ayarlar') + '</div>';
+    var adminRow = state.admin ? rowBtn('nav', 'admin', 'fa-solid fa-user-shield', 'purple', L('row.admin'), L('row.admin.s')) : '';
+    return ptitle('fa-solid fa-user', 'blue', L('pro.title')) + maintBanner() +
+      '<div class="pf"><div class="pf-a">' +
+      '<section class="pro"><div class="pro-top">' + avatarHtml() + '<div style="min-width:0"><h2>' + esc(fullName()) + '</h2><p>' + (u.username ? '@' + esc(u.username) : 'ID: ' + esc(u.id)) + '</p></div></div>' +
+      '<div class="pro-id"><div class="bal"><span class="bal-ico">' + STAR + '</span><div><strong id="bal-num">' + fmt(state.balance) + '</strong><span class="bal-lbl">' + esc(L('pro.balance')) + '</span></div></div>' +
+      '<button class="chip-btn" data-action="nav" data-arg="wallet">' + ico('i-plus') + esc(L('pro.topup')) + '</button></div></section>' +
+      '<section class="invite">' + artGift() + '<h2>' + esc(L('inv.h_a')) + '<em>' + esc(pct(refRate())) + '</em>' + esc(L('inv.h_b')) + '</h2><p>' + esc(L('inv.sub')) + '</p>' +
+      '<button class="pill-btn" data-action="open-invite">' + esc(L('inv.btn')) + ' ' + ico('i-chev') + '</button></section></div>' +
+      '<div class="pf-b"><div class="rows">' + adminRow +
+      rowBtn('nav', 'wallet', 'fa-solid fa-wallet', 'gold', L('row.wallet')) +
+      rowBtn('open-support', '', 'fa-solid fa-headset', 'cyan', L('row.support')) +
+      rowBtn('open-activate', '', 'fa-solid fa-key', 'green', L('buy.howto')) +
+      rowBtn('open-faq', '', 'fa-solid fa-circle-question', 'purple', L('row.faq')) +
+      rowBtn('open-terms', '', 'fa-solid fa-file-contract', 'slate', L('row.terms')) +
+      rowBtn('open-settings', '', 'fa-solid fa-gear', 'pink', L('row.settings')) + '</div></div></div>';
   }
 
   /* ---------- cüzdan ---------- */
@@ -358,47 +462,48 @@
   function needHtml() {
     var n = state.need, short = needShort();
     if (short > 0) {
-      return '<div class="need"><span class="ni">' + ico('i-alert') + '</span><div><h3>' + esc(n.label) + ' için ' + st(short) + ' eksik</h3>' +
-        '<p>Tutarı senin için doldurduk. Yükle, sonra satın almaya dön.</p></div></div>';
+      return '<div class="need"><span class="ni">' + ico('i-alert') + '</span><div><h3>' + L('w.need.short', { label: esc(n.label), amt: st(short) }) + '</h3>' +
+        '<p>' + esc(L('w.need.fill')) + '</p></div></div>';
     }
-    return '<div class="need ok"><span class="ni">' + ico('i-check') + '</span><div><h3>Bakiyen yeterli</h3>' +
-      '<p>' + esc(n.label) + ' için gereken ' + st(n.price) + ' hazır.</p></div></div>';
+    return '<div class="need ok"><span class="ni">' + ico('i-check') + '</span><div><h3>' + esc(L('w.need.ok')) + '</h3>' +
+      '<p>' + L('w.need.ok2', { label: esc(n.label), amt: st(n.price) }) + '</p></div></div>';
   }
-  function txRow(t) {
-    var inn = t.type === 'in';
-    return '<div class="tx ' + t.type + '"><span class="ti">' + ico(inn ? 'i-in' : 'i-out') + '</span>' +
-      '<div class="tt"><strong>' + esc(t.title) + '</strong><span>' + t.date + '</span></div>' +
-      '<span class="ta">' + (inn ? '+' : '−') + st(t.amount) + '</span></div>';
+  function txRow(x) {
+    var inn = x.amount > 0;
+    return '<div class="tx ' + (inn ? 'in' : 'out') + '"><span class="ti">' + ico(inn ? 'i-in' : 'i-out') + '</span>' +
+      '<div class="tt"><strong>' + esc(txTitle(x)) + '</strong><span>' + dateStr(x.created_at) + '</span></div>' +
+      '<span class="ta">' + (inn ? '+' : '−') + st(Math.abs(x.amount)) + '</span></div>';
   }
   function txListHtml() {
-    return state.tx.length ? state.tx.map(txRow).join('') :
-      '<div class="empty">' + ico('i-receipt') + '<h3>Henüz hareket yok</h3><p>Yüklemelerin ve harcamaların burada görünür.</p></div>';
+    return state.txs.length ? state.txs.map(txRow).join('') :
+      '<div class="empty">' + ico('i-receipt') + '<h3>' + esc(L('w.moves.t')) + '</h3><p>' + esc(L('w.moves.p')) + '</p></div>';
   }
   function walletView() {
     var short = needShort();
-    var chips = (short > 0 ? '<button class="chip need-chip" data-action="amt" data-arg="' + short + '" aria-pressed="false">' + st(short) + '<small>eksik</small></button>' : '') +
+    var chips = (short > 0 ? '<button class="chip need-chip" data-action="amt" data-arg="' + short + '" aria-pressed="false">' + st(short) + '<small>' + esc(L('w.short_chip')) + '</small></button>' : '') +
       presets().map(function (v) {
         return '<button class="chip" data-action="amt" data-arg="' + v + '" aria-pressed="false">' + st(v) + '</button>';
       }).join('');
-    return '<div class="whead"><button class="icon-btn" data-action="nav" data-arg="profile" aria-label="Geri">' + ico('i-back') + '</button><h1 class="h1">Cüzdan</h1></div>' +
-      '<section class="wcard" id="wcard"><span class="w-lbl">Bakiye</span>' +
+    return '<div class="whead"><button class="icon-btn" data-action="nav" data-arg="profile" aria-label="' + esc(L('back')) + '">' + ico('i-back') + '</button>' + ptitle('fa-solid fa-wallet', 'gold', L('w.title'), 'in-whead') + '</div>' +
+      '<div class="wg"><div class="wg-a">' +
+      '<section class="wcard" id="wcard"><span class="w-lbl">' + esc(L('w.balance')) + '</span>' +
       '<div class="w-bal"><span class="bal-ico" id="w-star">' + STAR + '</span><strong id="w-bal">' + fmt(state.balance) + '</strong></div>' +
-      '<p class="w-sub">Telegram Stars · satın alımlarda kullanılır</p></section>' +
+      '<p class="w-sub">' + esc(L('w.sub')) + '</p></section>' +
       '<div class="collapse' + (state.need ? ' open' : '') + '" id="need-wrap"><div class="inner" id="need-box">' + (state.need ? needHtml() : '') + '</div></div>' +
-      '<div class="collapse" id="back-wrap" inert><div class="inner"><button class="btn-ghost back-buy" data-action="back-to-buy">Satın almaya dön</button></div></div>' +
-      '<section class="dep"><p class="dep-t">Yıldız yükle</p>' +
-      '<label class="amt" id="amt-card" for="w-amt"><input id="w-amt" type="text" inputmode="numeric" autocomplete="off" placeholder="0" maxlength="6" aria-label="Yüklenecek yıldız miktarı">' + STAR + '</label>' +
-      '<div class="chips wchips" role="group" aria-label="Hızlı miktar">' + chips + '</div>' +
-      '<div class="after"><span>Yeni bakiye</span><strong id="w-after">' + fmt(state.balance) + '</strong></div>' +
-      '<button class="btn" id="w-dep" data-action="deposit"><span class="lbl" id="w-dep-lbl">Miktar gir</span><span class="wait">' + ico('i-spin') + 'İşleniyor…</span></button>' +
-      '<p class="legal" style="margin-top:12px">Ödeme Telegram Stars ile alınır. Yıldızlar ödemeden hemen sonra bakiyene eklenir.</p></section>' +
-      '<p class="wlabel">Hareketler</p><div class="txl" id="tx-list">' + txListHtml() + '</div>';
+      '<div class="collapse" id="back-wrap" inert><div class="inner"><button class="btn-ghost back-buy" data-action="back-to-buy">' + esc(L('w.back_buy')) + '</button></div></div>' +
+      '<section class="dep"><p class="dep-t">' + esc(L('w.dep.title')) + '</p>' +
+      '<label class="amt" id="amt-card" for="w-amt"><input id="w-amt" type="text" inputmode="numeric" autocomplete="off" placeholder="0" maxlength="6" aria-label="' + esc(L('w.amt.aria')) + '">' + STAR + '</label>' +
+      '<div class="chips wchips" role="group" aria-label="' + esc(L('w.quick')) + '">' + chips + '</div>' +
+      '<div class="after"><span>' + esc(L('w.after')) + '</span><strong id="w-after">' + fmt(state.balance) + '</strong></div>' +
+      '<button class="btn" id="w-dep" data-action="deposit"><span class="lbl" id="w-dep-lbl">' + esc(L('w.enter')) + '</span><span class="wait">' + ico('i-spin') + esc(L('w.processing')) + '</span></button>' +
+      '<p class="legal" style="margin-top:12px">' + esc(L('w.legal')) + '</p></section></div>' +
+      '<div class="wg-b"><p class="wlabel">' + esc(L('w.moves')) + '</p><div class="txl" id="tx-list">' + txListHtml() + '</div></div></div>';
   }
   function amtVal() { var i = $('#w-amt'); return i ? (parseInt(i.value, 10) || 0) : 0; }
   function syncAmount() {
     var a = amtVal(), lbl = $('#w-dep-lbl'), after = $('#w-after');
     if (!lbl) return;
-    lbl.innerHTML = a ? 'Yükle <span class="num">' + fmt(a) + '</span>' + STAR : 'Miktar gir';
+    lbl.innerHTML = a ? esc(L('w.load')) + ' <span class="num">' + fmt(a) + '</span>' + STAR : esc(L('w.enter'));
     after.textContent = fmt(state.balance + a);
     $$('.wchips .chip').forEach(function (c) { c.setAttribute('aria-pressed', String(a > 0 && +c.getAttribute('data-arg') === a)); });
   }
@@ -433,9 +538,9 @@
     syncNeed();
   }
   function goWalletNeed() {
-    var p = product(), t = tariff();
-    if (!p || !t) return;
-    state.need = { label: p.name + ' · ' + t.label, price: priceNow(), code: state.promoCode, productId: p.id, tariffId: t.id };
+    var p = product(), tr = tariff();
+    if (!p || !tr) return;
+    state.need = { label: p.name + ' · ' + tr.label, price: priceNow(), code: state.promoCode, productId: p.id, tariffId: tr.id };
     closeSheet();
     if (location.hash.replace('#', '') === 'wallet') { state.view = ''; route(); } else location.hash = 'wallet';
   }
@@ -447,9 +552,9 @@
   }
   function finishDeposit(dv) {
     var from = state.balance;
-    api('refresh').then(function (r) {
+    api('refresh', {}).then(function (r) {
       applyMe(r.me); depositDone(); haptic('success');
-      toast(fmt(dv) + ' yıldız yüklendi');
+      toast(L('w.t_done', { n: fmt(dv) }));
       if (state.view !== 'wallet') return;
       var wb = $('#w-bal'), wc = $('#wcard');
       tween(from, state.balance, 900, function (v) { if (wb) wb.textContent = fmt(v); });
@@ -458,14 +563,14 @@
       var tl = $('#tx-list'); if (tl) { tl.innerHTML = txListHtml(); animIn(tl.children); }
       setAmount(0, true);
       syncNeed();
-    }, function () { depositDone(); toast('Ödeme alındı, bakiyen birazdan güncellenecek'); });
+    }, function () { depositDone(); toast(L('w.t_soon')); });
   }
   function waitDeposit(id, dv) {
     var tries = 0;
     (function poll() {
       api('deposit_status', { id: id }).then(function (r) {
         if (r.status === 'paid') { finishDeposit(dv); return; }
-        if (++tries > 40) { depositDone(); toast('Ödeme alındı, bakiyen birazdan güncellenecek'); refreshMe(); return; }
+        if (++tries > 40) { depositDone(); toast(L('w.t_soon')); refreshMe(); return; }
         setTimeout(poll, 1500);
       }, function () {
         if (++tries > 40) { depositDone(); refreshMe(); return; }
@@ -477,11 +582,11 @@
     var dbtn = $('#w-dep');
     state.depositing = true; dbtn.classList.add('busy'); dbtn.disabled = true;
     api('invoice', { amount: dv }).then(function (d) {
-      if (!TG || typeof TG.openInvoice !== 'function') throw new Error('Bu Telegram sürümü ödemeyi desteklemiyor. Telegram’ı güncelle.');
+      if (!TG || typeof TG.openInvoice !== 'function') throw new Error(L('w.t_noinv'));
       TG.openInvoice(d.url, function (status) {
         if (status === 'paid') waitDeposit(d.deposit_id, dv);
-        else if (status === 'pending') { toast('Ödeme işleniyor…'); waitDeposit(d.deposit_id, dv); }
-        else { depositDone(); toast(status === 'cancelled' ? 'Ödeme iptal edildi' : 'Ödeme tamamlanamadı'); }
+        else if (status === 'pending') { toast(L('w.t_pending')); waitDeposit(d.deposit_id, dv); }
+        else { depositDone(); toast(status === 'cancelled' ? L('w.t_cancel') : L('w.t_fail')); }
       });
     }).catch(function (e) { depositDone(); toast(e.message); });
   }
@@ -504,14 +609,18 @@
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitBrand);
   if (document.fonts && document.fonts.load) document.fonts.load('400 30px "Dela Gothic One"').then(fitBrand, function () {});
 
-  var loadingHtml = function () { return '<div class="empty" style="margin-top:40vh;transform:translateY(-50%)">' + logo(56) + '<h3>Yükleniyor…</h3></div>'; };
+  // "Yükleniyor…" yazısı yerine iskelet (skeleton) görünür: sayfa anında oturur.
+  function skeletonHtml(kind) {
+    if (kind === 'admin') return '<div class="sk row-sk" style="height:62px;margin-top:20px"></div><div class="sk row-sk"></div><div class="sk row-sk"></div><div class="sk row-sk"></div>';
+    return headerHtml(false) + '<div class="sk hero-sk"></div><div class="sk card-sk"></div><div class="sk card-sk"></div>';
+  }
   var adminPromise = null;
   function loadAdmin() {
     if (window.EasyAdmin) return Promise.resolve();
     if (!adminPromise) {
       adminPromise = new Promise(function (res, rej) {
         var s = document.createElement('script');
-        s.src = '/admin.js?v=1'; s.onload = res; s.onerror = function () { adminPromise = null; rej(new Error('admin_load')); };
+        s.src = '/admin.js?v=2'; s.onload = res; s.onerror = function () { adminPromise = null; rej(new Error('admin_load')); };
         document.head.appendChild(s);
       });
     }
@@ -520,10 +629,12 @@
   function mount() {
     var v = state.view;
     if (v === 'admin') {
-      view.innerHTML = loadingHtml();
-      loadAdmin().then(function () {
-        if (state.view === 'admin') window.EasyAdmin.mount(view, window.EC);
-      }, function () { toast('Yönetici paneli yüklenemedi'); location.hash = 'profile'; });
+      var go = function () { if (state.view === 'admin') window.EasyAdmin.mount(view, window.EC); };
+      if (window.EasyAdmin) go();
+      else {
+        view.innerHTML = ptitle('fa-solid fa-user-shield', 'purple', L('row.admin')) + skeletonHtml('admin');
+        loadAdmin().then(go, function () { toast(L('adm.fail')); location.hash = 'profile'; });
+      }
       syncBack();
       return;
     }
@@ -536,7 +647,6 @@
     syncBack();
     if (state.booted && v !== 'catalog') refreshMe();
   }
-  var navTimer;
   function route(first) {
     if (!state.booted) return;
     var h = location.hash.replace('#', '');
@@ -545,12 +655,7 @@
     if (first) { state.view = v; setDock(); mount(); return; }
     if (v === state.view) { window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' }); return; }
     state.view = v; setDock();
-    clearTimeout(navTimer);
-    view.classList.add('leaving');
-    navTimer = setTimeout(function () {
-      mount(); window.scrollTo(0, 0);
-      view.classList.remove('leaving');
-    }, reduce ? 0 : 160);
+    mount(); window.scrollTo(0, 0);
   }
 
   /* Telegram geri tuşu */
@@ -569,10 +674,10 @@
   /* ---------- ürün alt sayfası ---------- */
   var shown = 0, cancelTotal = null;
   function shortAmt() { return Math.max(0, priceNow() - state.balance); }
-  function shortBtn() { return ico('i-wallet') + '<span>' + st(shortAmt() || 1) + ' yükle</span>'; }
+  function shortBtn() { return ico('i-wallet') + '<span>' + L('p.topup', { amt: st(shortAmt() || 1) }) + '</span>'; }
   function payNote() {
     var low = priceNow() > state.balance;
-    return (low ? 'Yetersiz bakiye · ' : 'Bakiye · ') + st(state.balance);
+    return L(low ? 'p.bal_low' : 'p.bal', { amt: st(state.balance) });
   }
   function updatePayState() {
     var c = $('#paycard', sheet); if (!c) return;
@@ -587,16 +692,16 @@
     var nums = $$('[data-num]', sheet);
     if (!nums.length) return;
     var to = priceNow(), from = shown;
-    var set = function (v) { shown = v; var t = fmt(v); nums.forEach(function (n) { n.textContent = t; }); };
+    var set = function (v) { shown = v; var s = fmt(v); nums.forEach(function (n) { n.textContent = s; }); };
     if (cancelTotal) cancelTotal();
     cancelTotal = tween(from, to, animate ? 520 : 0, set);
     updatePayState();
   }
   function licHtml() {
-    var t = tariff(); if (!t) return '';
-    var title = t.days ? 'Lisans süresi — ' + t.days + ' gün' : 'Lisans — sınırsız';
-    var sub = t.days ? 'Süre, anahtarın etkinleştirildiği andan başlar.' : 'Süre sınırı olmadan geçerlidir.';
-    return '<h4>' + title + '</h4><p>' + sub + '</p>';
+    var tr = tariff(); if (!tr) return '';
+    var title = tr.days ? L('p.lic.days', { n: tr.days }) : L('p.lic.unl');
+    var sub = tr.days ? L('p.lic.days_s') : L('p.lic.unl_s');
+    return '<h4>' + esc(title) + '</h4><p>' + esc(sub) + '</p>';
   }
   function setPmsg(ok, text) {
     var el = $('#pmsg'); if (!el) return;
@@ -609,27 +714,27 @@
     return api('quote', { tariff_id: tid, code: code }).then(function (q) {
       if (state.tariff !== tid || state.sheet !== 'product') return;
       state.quote = q; state.promoCode = q.promo_code || '';
-      setPmsg(true, 'Kod uygulandı: −' + fmt(q.discount) + ' yıldız indirim');
+      setPmsg(true, L('p.promo.ok', { n: fmt(q.discount) }));
       updateTotal(true);
     }, function (e) {
       if (state.tariff !== tid || state.sheet !== 'product') return;
       state.quote = null; state.promoCode = '';
-      setPmsg(false, e.message || 'Kod geçersiz.');
+      setPmsg(false, e.message || L('p.promo.bad'));
       var pin = $('#promo-input'); if (pin) shake(pin);
       updateTotal(true);
     });
   }
   function productSheet() {
     var p = product();
-    if (!p) return '<div class="grab"></div><div class="empty"><h3>Ürün bulunamadı</h3></div>';
+    if (!p) return '<div class="grab"></div><div class="empty"><h3>' + esc(L('p.notfound')) + '</h3></div>';
     if (state.paid) {
       var o = state.paid;
-      var notice = state.settings.order_notice || 'Siparişin onaylanması için destek seninle Telegram üzerinden iletişime geçecek.';
-      return '<div class="grab"></div><div class="done"><div class="ok">' + ico('i-check') + '</div><h3>Sipariş alındı</h3>' +
+      var notice = state.settings.order_notice || L('p.paid.notice');
+      return '<div class="grab"></div><div class="done"><div class="ok">' + ico('i-check') + '</div><h3>' + esc(L('p.paid.h')) + '</h3>' +
         '<p>' + esc(notice) + '</p>' +
         '<p>#' + o.id + ' · ' + esc(o.product_name) + ' · ' + esc(o.tariff_label) + '</p>' +
-        '<p>Kalan bakiye: ' + st(state.balance) + '</p>' +
-        '<button class="btn" data-action="goto-purchases"><span class="lbl">Satın alımları aç</span></button></div>';
+        '<p>' + L('p.paid.left', { amt: st(state.balance) }) + '</p>' +
+        '<button class="btn" data-action="goto-purchases"><span class="lbl">' + esc(L('p.paid.open')) + '</span></button></div>';
     }
     var tar = p.tariffs.map(function (x) {
       return '<button class="tariff" data-action="tariff" data-arg="' + esc(x.id) + '" aria-pressed="' + (x.id === state.tariff) + '">' +
@@ -640,82 +745,88 @@
       '<div class="phero">' + (p.image_url ? '<img class="pcard-img" src="' + esc(p.image_url) + '" alt="' + esc(p.name) + '" decoding="async" draggable="false">' : artFlow(true)) + '</div>' +
       '<h2 class="sh-name">' + esc(p.name) + '</h2>' +
       '<p class="sh-desc">' + esc(p.description) + '</p>' +
-      '<p class="label">Tarife</p><div class="tariffs">' + tar + '</div>' +
-      '<div class="info"><div><h4>Nasıl teslim edilir?</h4><p>Sipariş verdikten sonra destek seninle Telegram’dan iletişime geçer. Sipariş tamamlanınca anahtarın «Satın Alımlarım» bölümünde görünür.</p></div><div id="lic">' + licHtml() + '</div></div>' +
-      '<p class="label">Ödeme yöntemi</p>' +
+      '<p class="label">' + esc(L('p.plan')) + '</p><div class="tariffs">' + tar + '</div>' +
+      '<div class="info"><div><h4>' + esc(L('p.how.h')) + '</h4><p>' + esc(L('p.how.t')) + '</p></div><div id="lic">' + licHtml() + '</div></div>' +
+      '<p class="label">' + esc(L('p.paywith')) + '</p>' +
       '<div class="paycard' + (low ? ' low' : '') + '" id="paycard"><span class="pc-ico">' + STAR + '</span>' +
-      '<div class="pc-txt"><strong>Telegram Stars</strong><span id="paynote">' + payNote() + '</span></div>' +
+      '<div class="pc-txt"><strong>' + esc(L('p.stars')) + '</strong><span id="paynote">' + payNote() + '</span></div>' +
       '<span class="pc-tick">' + ico('i-check') + '</span></div>' +
       '<div class="collapse' + (low ? ' open' : '') + '" id="topup-wrap"' + (low ? '' : ' inert') + '><div class="inner"><button class="btn-ghost topup-btn" id="topup-btn" data-action="to-wallet-need">' + shortBtn() + '</button></div></div>' +
-      '<div class="collapse open" id="promo-link-wrap"><div class="inner"><button class="link" data-action="toggle-promo">Promosyon kodun var mı?</button></div></div>' +
-      '<div class="collapse" id="promo-wrap"><div class="inner"><div class="promo"><input id="promo-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" placeholder="Promosyon kodu" aria-label="Promosyon kodu"><button data-action="apply-promo">Uygula</button></div><p class="pmsg" id="pmsg"></p></div></div>' +
-      '<div class="total"><span>Toplam</span><strong><span class="num" data-num>0</span>' + STAR + '</strong></div>' +
+      '<div class="collapse open" id="promo-link-wrap"><div class="inner"><button class="link" data-action="toggle-promo">' + esc(L('p.promo.q')) + '</button></div></div>' +
+      '<div class="collapse" id="promo-wrap"><div class="inner"><div class="promo"><input id="promo-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" placeholder="' + esc(L('p.promo.ph')) + '" aria-label="' + esc(L('p.promo.ph')) + '"><button data-action="apply-promo">' + esc(L('p.promo.apply')) + '</button></div><p class="pmsg" id="pmsg"></p></div></div>' +
+      '<div class="total"><span>' + esc(L('p.total')) + '</span><strong><span class="num" data-num>0</span>' + STAR + '</strong></div>' +
       '<div class="paybar">' +
-      '<div class="pay"><button class="btn" id="pay-btn" data-action="pay"><span class="lbl">Öde <span class="num" data-num>0</span>' + STAR + '</span><span class="wait">' + ico('i-spin') + 'İşleniyor…</span></button></div></div>' +
-      '<p class="legal">«Öde»ye dokunarak kullanıcı sözleşmesini kabul edersin. Siparişin onaylanması için destek seninle Telegram’dan iletişime geçer; tamamlanamayan siparişlerde tutar bakiyene iade edilir.</p>';
+      '<div class="pay"><button class="btn" id="pay-btn" data-action="pay"><span class="lbl">' + esc(L('p.pay')) + ' <span class="num" data-num>0</span>' + STAR + '</span><span class="wait">' + ico('i-spin') + esc(L('w.processing')) + '</span></button></div></div>' +
+      '<p class="legal">' + esc(L('p.legal')) + '</p>';
   }
 
   /* ---------- diğer alt sayfalar ---------- */
-  var FAQ = [
-    ['Anahtar ne kadar hızlı gelir?', 'Sipariş verdikten sonra destek seninle Telegram üzerinden iletişime geçer. Sipariş tamamlanınca anahtar «Satın Alımlarım» bölümünde görünür.'],
-    ['Nasıl ödeme yapılır?', 'Tek ödeme yöntemi Telegram Stars’tır. Bakiyen Profil sayfasında görünür, gerekirse oradan yükleyebilirsin.'],
-    ['Lisans süresi ne zaman başlar?', 'Satın alma anında değil, anahtarı etkinleştirdiğin anda başlar.'],
-    ['Ödeme iade edilir mi?', 'Siparişin tamamlanamazsa tutar bakiyene iade edilir.'],
-    ['Anahtar gelmedi, ne yapmalıyım?', 'Destek bölümünden ID’ni kopyala ve destek sohbetine gönder. ID ile siparişini daha hızlı buluruz.']
-  ];
-  function wrap(title, body) {
-    return '<div class="grab"></div><div class="sh-head"><h2 class="sh-title">' + title + '</h2></div>' + body;
+  function wrap(title, body, fa, col) {
+    return '<div class="grab"></div><div class="sh-head">' + (fa ? tile(fa, col) : '') + '<h2 class="sh-title">' + title + '</h2></div>' + body;
   }
   function themeOptions() {
-    return THEMES.map(function (t) {
-      return '<button class="theme-opt" data-action="theme" data-arg="' + t.id + '" aria-pressed="' + (state.theme === t.id) + '" style="--p-bg:' + t.bg + ';--p-s:' + t.s + ';--p-a:' + t.a + '">' +
+    return THEMES.map(function (th) {
+      return '<button class="theme-opt" data-action="theme" data-arg="' + th.id + '" aria-pressed="' + (state.theme === th.id) + '" style="--p-bg:' + th.bg + ';--p-s:' + th.s + ';--p-a:' + th.a + '">' +
         '<span class="prev"><i class="pa"></i><i class="ps"></i><i class="ps s2"></i></span>' +
-        '<span class="tn">' + t.name + '</span><span class="tck">' + ico('i-check') + '</span></button>';
+        '<span class="tn">' + esc(L('th.' + th.id)) + '</span><span class="tck">' + ico('i-check') + '</span></button>';
     }).join('');
   }
-  function notesHtml() {
-    if (!state.notes.length) return '<div class="empty">' + ico('i-bell') + '<h3>Bildirim yok</h3><p>Sipariş ve bakiye hareketlerin burada görünür.</p></div>';
-    return '<div class="txl">' + state.notes.map(function (n) {
-      return '<div class="tx' + (n.is_read ? '' : ' in') + '"><span class="ti">' + ico('i-bell') + '</span><div class="tt"><strong>' + esc(n.title) + '</strong>' +
-        (n.body ? '<span>' + esc(n.body) + '</span>' : '') + '<span>' + dateTime(n.created_at) + '</span></div></div>';
+  function langOptions() {
+    return '<div class="langs" role="group" aria-label="' + esc(L('set.lang')) + '">' + I.SUPPORTED.map(function (l) {
+      return '<button class="lang-opt" data-action="pick-lang" data-arg="' + l + '" aria-pressed="' + (I.getLang() === l) + '">' +
+        '<span class="tile" style="--c:' + COL.blue + ';font-size:15px;font-weight:900">' + l.toUpperCase() + '</span><span>' + esc(I.NAMES[l]) + '</span></button>';
     }).join('') + '</div>';
+  }
+  function notesHtml() {
+    if (!state.notes.length) return '<div class="empty">' + ico('i-bell') + '<h3>' + esc(L('nt.empty.t')) + '</h3><p>' + esc(L('nt.empty.p')) + '</p></div>';
+    return '<div class="txl">' + state.notes.map(function (n) {
+      var v = noteView(n);
+      return '<div class="tx' + (n.is_read ? '' : ' in') + '"><span class="ti">' + ico('i-bell') + '</span><div class="tt"><strong>' + esc(v.t) + '</strong>' +
+        (v.b ? '<span>' + esc(v.b) + '</span>' : '') + '<span>' + dateTime(n.created_at) + '</span></div></div>';
+    }).join('') + '</div><p class="legal">' + esc(L('nt.auto')) + '</p>';
   }
   function sheetBody() {
     switch (state.sheet) {
       case 'product': return productSheet();
-      case 'custom': return state.custom ? wrap(state.custom.title, state.custom.html) : '';
-      case 'notes': return wrap('Bildirimler', notesHtml());
+      case 'custom':
+        return state.custom ? wrap(state.custom.title, state.custom.html, state.custom.icon && state.custom.icon[0], state.custom.icon && state.custom.icon[1]) : '';
+      case 'notes': return wrap(esc(L('nt.title')), notesHtml(), 'fa-solid fa-bell', 'orange');
+      case 'lang': return wrap(esc(L('set.lang')), langOptions(), 'fa-solid fa-language', 'cyan');
       case 'support':
-        return wrap('Destek',
-          '<div class="promo-card"><h3>Ödeme, anahtar ve etkinleştirmede yardımcı olalım</h3>' +
-          '<button class="btn" data-action="support-chat"><span>' + ico('i-send') + 'Sohbete yaz</span></button>' +
-          '<div class="note">Her gün 10:00–22:00 (MSK) yanıt veriyoruz</div></div>' +
-          '<div class="sub"><button class="row tight" data-action="open-faq">' + ico('i-help') + '<span class="grow">Sık sorulan sorular<small>Ödeme, anahtarlar, etkinleştirme</small></span>' + ico('i-chev', 'chev') + '</button>' +
-          '<button class="row tight" data-action="copy" data-arg="' + esc(state.me ? state.me.id : '') + '">' + ico('i-copy') + '<span class="grow">ID’mi kopyala<small>Sohbete gönder, siparişini daha hızlı bulalım</small></span></button></div>');
+        return wrap(esc(L('sup.title')),
+          '<div class="promo-card"><h3>' + esc(L('sup.h')) + '</h3>' +
+          '<button class="btn" data-action="support-chat"><span>' + ico('i-send') + esc(L('sup.chat')) + '</span></button>' +
+          '<div class="note">' + esc(L('sup.hours')) + '</div></div>' +
+          '<div class="sub"><button class="row tight" data-action="open-faq">' + tile('fa-solid fa-circle-question', 'purple') + '<span class="grow">' + esc(L('row.faq')) + '<small>' + esc(L('sup.faq.s')) + '</small></span>' + ico('i-chev', 'chev') + '</button>' +
+          '<button class="row tight" data-action="copy" data-arg="' + esc(state.me ? state.me.id : '') + '">' + tile('fa-regular fa-copy', 'teal') + '<span class="grow">' + esc(L('sup.id')) + '<small>' + esc(L('sup.id.s')) + '</small></span></button></div>',
+          'fa-solid fa-headset', 'cyan');
       case 'faq':
-        return wrap('Sık sorulan sorular', FAQ.map(function (q, i) {
-          return '<div class="faq"><button class="faq-q" data-action="faq" data-arg="' + i + '" aria-expanded="false" aria-controls="faq-a' + i + '"><span>' + q[0] + '</span>' + ico('i-chev') + '</button>' +
-            '<div class="faq-a" id="faq-a' + i + '" role="region"><div class="faq-in"><p>' + q[1] + '</p></div></div></div>';
-        }).join(''));
+        return wrap(esc(L('faq.title')), [1, 2, 3, 4, 5].map(function (i) {
+          return '<div class="faq"><button class="faq-q" data-action="faq" data-arg="' + i + '" aria-expanded="false" aria-controls="faq-a' + i + '"><span>' + esc(L('faq.q' + i)) + '</span>' + ico('i-chev') + '</button>' +
+            '<div class="faq-a" id="faq-a' + i + '" role="region"><div class="faq-in"><p>' + esc(L('faq.a' + i)) + '</p></div></div></div>';
+        }).join(''), 'fa-solid fa-circle-question', 'purple');
       case 'activate':
-        return wrap('Nasıl etkinleştirilir',
-          '<ol class="steps"><li>«Satın Alımlarım» bölümünü aç ve anahtarı kopyala.</li><li>Uygulamayı bilgisayarında çalıştır.</li><li>Anahtarı etkinleştirme alanına yapıştır ve «Etkinleştir»e bas.</li><li>Onayı bekle. Lisans süresi bu andan itibaren başlar.</li><li>Anahtar çalışmazsa desteğe yaz ve ID’ni ekle.</li></ol>');
+        return wrap(esc(L('buy.howto')),
+          '<ol class="steps">' + [1, 2, 3, 4, 5].map(function (i) { return '<li>' + esc(L('act.s' + i)) + '</li>'; }).join('') + '</ol>', 'fa-solid fa-key', 'green');
       case 'invite':
-        var link = state.invite, r = refRate();
-        return wrap('Arkadaşlarını davet et',
-          '<div class="info"><div><h4>Arkadaşının her alışverişinden %' + r + '</h4><p>Linkini arkadaşına gönder. Siparişi tamamlandığında tutarın %' + r + '’i sana bakiye olarak yazılır.</p></div></div>' +
+        var link = state.invite, r = pct(refRate());
+        return wrap(esc(L('invs.title')),
+          '<div class="info"><div><h4>' + esc(L('invs.h', { r: r })) + '</h4><p>' + esc(L('invs.p', { r: r })) + '</p></div></div>' +
           (link
-            ? '<div class="key" style="margin-top:12px" data-action="copy" data-arg="' + esc(link) + '" role="button" tabindex="0" aria-label="Linki kopyala" title="Kopyalamak için dokun"><code>' + esc(link) + '</code></div>' +
-              '<button class="btn" style="margin-top:12px" data-action="share-invite"><span>' + ico('i-send') + 'Arkadaşına gönder</span></button>'
-            : '<p class="legal" style="text-align:left">Davet linki şu an hazır değil, biraz sonra tekrar dene.</p>') +
-          '<div class="info"><div><h4>Davet ettiklerin</h4><p>' + (state.ref.count || 0) + ' kişi · kazancın ' + st(state.ref.earned || 0) + '</p></div></div>');
+            ? '<div class="key" style="margin-top:12px" data-action="copy" data-arg="' + esc(link) + '" role="button" tabindex="0" aria-label="' + esc(L('invs.link')) + '" title="' + esc(L('buy.tap_copy')) + '"><code>' + esc(link) + '</code></div>' +
+              '<button class="btn" style="margin-top:12px" data-action="share-invite"><span>' + ico('i-send') + esc(L('invs.send')) + '</span></button>'
+            : '<p class="legal" style="text-align:left">' + esc(L('invs.none')) + '</p>') +
+          '<div class="info"><div><h4>' + esc(L('invs.mine')) + '</h4><p>' + L('invs.stat', { c: state.ref.count || 0, amt: st(state.ref.earned || 0) }) + '</p></div></div>',
+          'fa-solid fa-gift', 'pink');
       case 'terms':
-        return wrap('Sözleşme',
-          '<div class="text-block"><h4>Anahtarlar</h4><p>Anahtar, siparişin destek tarafından onaylanmasının ardından teslim edilir ve seçilen tarife süresince geçerlidir.</p><h4>Süre</h4><p>Lisans süresi, anahtarın etkinleştirildiği andan itibaren sayılır.</p><h4>İade</h4><p>Tamamlanamayan siparişlerde tutar bakiyene iade edilir.</p></div>');
+        return wrap(esc(L('terms.title')),
+          '<div class="text-block"><h4>' + esc(L('terms.k')) + '</h4><p>' + esc(L('terms.kt')) + '</p><h4>' + esc(L('terms.s')) + '</h4><p>' + esc(L('terms.st')) + '</p><h4>' + esc(L('terms.r')) + '</h4><p>' + esc(L('terms.rt')) + '</p></div>',
+          'fa-solid fa-file-contract', 'slate');
       case 'settings':
-        return wrap('Ayarlar',
-          '<p class="label" style="margin-top:2px">Tema</p><div class="themes" role="group" aria-label="Tema">' + themeOptions() + '</div>' +
-          '<p class="legal">Seçimin bu cihazda saklanır.</p>');
+        return wrap(esc(L('set.title')),
+          '<p class="label" style="margin-top:2px">' + esc(L('set.lang')) + '</p>' + langOptions() +
+          '<p class="label">' + esc(L('set.theme')) + '</p><div class="themes" role="group" aria-label="' + esc(L('set.theme')) + '">' + themeOptions() + '</div>' +
+          '<p class="legal">' + esc(L('set.theme.note')) + '</p>', 'fa-solid fa-gear', 'pink');
     }
     return '';
   }
@@ -760,9 +871,10 @@
     if (lastFocus && lastFocus.focus) { try { lastFocus.focus({ preventScroll: true }); } catch (e) {} }
     lastFocus = null;
     syncBack();
+    if (dirtyView) { dirtyView = false; if (state.booted && state.view !== 'wallet' && state.view !== 'admin') mount(); }
   }
 
-  /* ---------- yalnızca yukarıdan aşağı çekerek kapatma ---------- */
+  /* ---------- yukarıdan aşağı çekerek kapatma (yalnızca telefon/tablet) ---------- */
   var drag = null, pull = null;
   function sheetMove(dy, h) {
     sheet.style.transform = 'translate3d(0,' + dy + 'px,0)';
@@ -775,7 +887,7 @@
     sheet.style.transform = ''; scrim.style.opacity = '';
   }
   function dragStart(e) {
-    if (!sheet.classList.contains('show')) return;
+    if (wide() || !sheet.classList.contains('show')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     var g = e.target.closest('.grab');
     if (!g) return;
@@ -794,7 +906,7 @@
     sheetRelease(d.dy, d.t);
   }
   function pullStart(e) {
-    if (drag || pull || e.touches.length !== 1 || !sheet.classList.contains('show')) return;
+    if (wide() || drag || pull || e.touches.length !== 1 || !sheet.classList.contains('show')) return;
     if (e.target.closest('.grab')) return;
     pull = { y: e.touches[0].clientY, t: 0, dy: 0, on: false, h: 1 };
   }
@@ -827,19 +939,45 @@
     })(t0);
   }
 
-  /* ---------- açılış / hata ekranları ---------- */
+  /* ---------- açılış / hata / bakım ekranları ---------- */
   function renderGate(kind, msg) {
     var dock = $('.dock'); if (dock) dock.hidden = true;
     closeSheet();
+    if (kind === 'maintenance') {
+      view.innerHTML = headerHtml(false) +
+        '<section class="mt"><div class="mt-ico"><i class="fa-solid fa-screwdriver-wrench"></i></div>' +
+        '<h2>' + esc(L('mt.title')) + '</h2><p>' + esc(L('mt.text')) + '</p>' +
+        '<button class="btn" data-action="support-chat"><span><i class="fa-brands fa-telegram"></i>' + esc(L('mt.contact')) + '</span></button></section>';
+      animIn(view.children); fitBrand();
+      return;
+    }
     var cfg = {
-      telegram: ['i-send', 'Telegram içinde aç', 'EasyCheats yalnızca Telegram Mini App olarak çalışır. Botu Telegram’da açıp mağaza düğmesine dokun.', state.bot && state.bot.username ? ['open-bot', 'Telegram’da aç'] : null],
-      error: ['i-alert', 'Bağlanılamadı', msg || 'Bir sorun oluştu.', ['retry', 'Tekrar dene']],
-      banned: ['i-alert', 'Hesabın kısıtlandı', msg ? 'Sebep: ' + msg : 'Destek ile iletişime geç.', ['support-chat', 'Destek ile konuş']],
-      maintenance: ['i-alert', 'Mağaza bakımda', 'Kısa süre sonra tekrar dene.', ['retry', 'Tekrar dene']]
+      telegram: ['i-send', L('gate.tg.t'), L('gate.tg.p'), state.bot && state.bot.username ? ['open-bot', L('gate.tg.btn')] : null],
+      error: ['i-alert', L('gate.err.t'), msg || L('gate.err.p'), ['retry', L('retry')]],
+      banned: ['i-alert', L('gate.ban.t'), msg ? L('gate.ban.p1', { r: msg }) : L('gate.ban.p2'), ['support-chat', L('gate.ban.btn')]]
     }[kind];
-    view.innerHTML = headerHtml(false) + '<div class="empty">' + ico(cfg[0]) + '<h3>' + cfg[1] + '</h3><p>' + esc(cfg[2]) + '</p>' +
-      (cfg[3] ? '<button class="btn-ghost" data-action="' + cfg[3][0] + '">' + cfg[3][1] + '</button>' : '') + '</div>';
+    view.innerHTML = headerHtml(false) + '<div class="empty">' + ico(cfg[0]) + '<h3>' + esc(cfg[1]) + '</h3><p>' + esc(cfg[2]) + '</p>' +
+      (cfg[3] ? '<button class="btn-ghost" data-action="' + cfg[3][0] + '">' + esc(cfg[3][1]) + '</button>' : '') + '</div>';
     fitBrand();
+  }
+  function renderLangPick(cb) {
+    langCb = cb;
+    view.innerHTML = headerHtml(false) + '<section class="lp"><h2>Dil seç · Language · Язык</h2>' +
+      '<p>Choose the app language.<br>Uygulama dilini seç.<br>Выберите язык приложения.</p>' +
+      I.SUPPORTED.map(function (l) {
+        return '<button class="lp-btn" data-action="pick-lang" data-arg="' + l + '"><span class="tile lg" style="--c:' + COL.blue + ';font-size:17px;font-weight:900">' + l.toUpperCase() + '</span>' + esc(I.NAMES[l]) + '</button>';
+      }).join('') + '</section>';
+    animIn(view.children); fitBrand();
+  }
+  function setLanguage(l) {
+    if (I.SUPPORTED.indexOf(l) < 0) return;
+    var changed = l !== I.getLang();
+    lsSet('eac-lang', l);
+    if (!changed) return;
+    applyLang(l);
+    if (INIT) api('set_lang', { lang: l }).then(function () {}, function () {});
+    if (state.sheet === 'settings' || state.sheet === 'lang') renderSheet();
+    if (state.booted) mount();
   }
   function refParam() {
     var sp = TG && TG.initDataUnsafe && TG.initDataUnsafe.start_param;
@@ -847,7 +985,8 @@
     try { return new URLSearchParams(location.search).get('ref') || ''; } catch (e) { return ''; }
   }
   function tgInit() {
-    if (!TG) return;
+    if (!TG || tgDone) return;
+    tgDone = true;
     try { TG.ready(); } catch (e) {}
     try { TG.expand(); } catch (e) {}
     try { if (TG.disableVerticalSwipes) TG.disableVerticalSwipes(); } catch (e) {}
@@ -857,6 +996,15 @@
   function boot() {
     var dock = $('.dock');
     dock.hidden = true;
+    state.booted = false; state.maint = false;
+    if (INIT) tgInit();
+    var l = resolveLang() || (!INIT ? (I.pick(navigator.language) || 'en') : null);
+    if (!l) {
+      applyLang('en');
+      renderLangPick(function (sel) { lsSet('eac-lang', sel); applyLang(sel); boot(); });
+      return;
+    }
+    applyLang(l);
     if (!INIT) {
       renderGate('telegram');
       api('info').then(function (d) {
@@ -865,18 +1013,24 @@
       }, function () {});
       return;
     }
-    tgInit();
-    view.innerHTML = loadingHtml();
+    view.innerHTML = skeletonHtml();
     api('boot', { ref: refParam() }).then(function (d) {
       if (d.banned) { renderGate('banned', d.reason); return; }
       state.settings = d.settings || {};
       state.products = (d.catalog && d.catalog.products) || [];
       state.invite = d.invite_link || null; state.bot = d.bot || null;
+      I.setOverrides(d.i18n); catHash = d.ch; i18nHash = d.ih;
       applyMe(d.me);
-      if (state.settings.maintenance === true && !state.admin) { renderGate('maintenance'); return; }
+      // Elle seçilmiş dil sunucuda da tutulur (bot mesajları bu dilde gider)
+      var manual = I.pick(lsGet('eac-lang'));
+      if (manual && d.me.user.lang !== manual) api('set_lang', { lang: manual }).then(function () {}, function () {});
+      if (state.settings.maintenance === true && !state.admin) { state.maint = true; renderGate('maintenance'); return; }
       state.booted = true;
       dock.hidden = false;
       route(true);
+      schedulePurge();
+      // Yönetici ise panel arka planda önceden yüklenir (sayfaya geçerken bekleme olmasın)
+      if (state.admin) setTimeout(function () { loadAdmin().then(function () { if (window.EasyAdmin && window.EasyAdmin.prefetch) window.EasyAdmin.prefetch(window.EC); }, function () {}); }, 500);
     }).catch(function (e) { renderGate('error', e.message); });
   }
 
@@ -885,7 +1039,10 @@
     switch (name) {
       case 'nav': if (arg === 'wallet') state.need = null; closeSheet(); if (location.hash.replace('#', '') === arg) route(); else location.hash = arg; break;
       case 'tab': setTab(arg); break;
-      case 'toast': toast(arg); break;
+      case 'pick-lang':
+        if (langCb) { var cb = langCb; langCb = null; cb(arg); } else setLanguage(arg);
+        break;
+      case 'open-lang': openSheet('lang'); break;
       case 'copy':
         copy(arg); haptic('light');
         if (el && el.classList.contains('key')) {
@@ -902,9 +1059,9 @@
       case 'deposit':
         if (state.depositing) break;
         var dv = amtVal(), S = state.settings, dmin = S.deposit_min || 1, dmax = S.deposit_max || 1000000;
-        if (!dv) { toast('Yüklemek istediğin miktarı gir'); shake($('#amt-card')); var wi = $('#w-amt'); if (wi) wi.focus(); break; }
-        if (dv < dmin) { toast('En az ' + fmt(dmin) + ' yıldız yükleyebilirsin'); shake($('#amt-card')); break; }
-        if (dv > dmax) { toast('En fazla ' + fmt(dmax) + ' yıldız yükleyebilirsin'); shake($('#amt-card')); break; }
+        if (!dv) { toast(L('w.t_enter')); shake($('#amt-card')); var wi = $('#w-amt'); if (wi) wi.focus(); break; }
+        if (dv < dmin) { toast(L('w.t_min', { n: fmt(dmin) })); shake($('#amt-card')); break; }
+        if (dv > dmax) { toast(L('w.t_max', { n: fmt(dmax) })); shake($('#amt-card')); break; }
         startDeposit(dv);
         break;
       case 'back-to-buy':
@@ -920,7 +1077,7 @@
           }
         };
         if (location.hash.replace('#', '') === 'catalog') reopen();
-        else { location.hash = 'catalog'; setTimeout(reopen, reduce ? 30 : 320); }
+        else { location.hash = 'catalog'; setTimeout(reopen, reduce ? 30 : 200); }
         break;
       case 'theme': setTheme(arg); break;
       case 'open-product':
@@ -959,6 +1116,7 @@
             state.unread = 0;
             state.notes.forEach(function (n) { n.is_read = true; });
             var d = $('#bell .dot'); if (d) d.remove();
+            schedulePurge();   // görülen bildirimler 15 sn sonra silinir
           }, function () {});
         }
         break;
@@ -977,7 +1135,7 @@
       case 'apply-promo':
         var pin = $('#promo-input');
         var code = pin ? pin.value.trim().toUpperCase() : '';
-        if (!code) { setPmsg(false, 'Bir kod gir.'); if (pin) shake(pin); break; }
+        if (!code) { setPmsg(false, L('p.promo.empty')); if (pin) shake(pin); break; }
         applyPromo(code);
         break;
       case 'pay':
@@ -990,7 +1148,7 @@
         if (state.promoCode) body.code = state.promoCode;
         api('order', body).then(function (r) {
           applyMe(r.me); haptic('success');
-          if (state.sheet !== 'product') { toast('Siparişin alındı'); repaint(); return; }
+          if (state.sheet !== 'product') { toast(L('p.t_ok')); repaint(); return; }
           state.paying = false; state.paid = r.order;
           renderSheet();
           sheet.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
@@ -1011,13 +1169,13 @@
       case 'check':
         var oid = +arg;
         if (!el || el.disabled) break;
-        el.disabled = true; el.textContent = 'Kontrol ediliyor…';
-        api('refresh').then(function (r) {
+        el.disabled = true; el.textContent = L('buy.checking');
+        api('refresh', {}).then(function (r) {
           applyMe(r.me);
           var it = state.purchases.filter(function (x) { return x.id === oid; })[0];
           if (state.view === 'purchases') { var pl = $('#plist'); pl.innerHTML = listHtml(); animIn(pl.children); updateCounts(); }
-          toast(!it || it.status === 'pending' ? 'Sipariş henüz onaylanmadı' : it.status === 'completed' ? 'Siparişin tamamlandı' : 'Sipariş iade edildi, tutar bakiyene döndü');
-        }, function (e) { el.disabled = false; el.textContent = 'Durumu kontrol et'; toast(e.message); });
+          toast(!it || it.status === 'pending' ? L('buy.t_pending') : it.status === 'completed' ? L('buy.t_done') : L('buy.t_refunded'));
+        }, function (e) { el.disabled = false; el.textContent = L('buy.check'); toast(e.message); });
         break;
       default:
         if (name.indexOf('adm:') === 0 && window.EasyAdmin) window.EasyAdmin.act(name, arg, el);
@@ -1047,10 +1205,10 @@
     if (e.target.value !== v) e.target.value = v;
     syncAmount();
   });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshMe(); });
-  setInterval(function () {
-    if (!document.hidden && state.booted && (state.view === 'purchases' || state.view === 'profile')) refreshMe();
-  }, 30000);
+  // Uygulama öne gelince: hemen yenile + bildirimler "görüldü" say
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { refreshMe(); markSeen(); } });
+  // Canlı veri: 3 sn'de bir (yalnızca ekran açıkken) bakiye, sipariş, bildirim, ayar ve katalog yenilenir
+  setInterval(function () { if (!document.hidden) refreshMe(); }, 3000);
   scrim.addEventListener('click', closeSheet);
   sheet.addEventListener('pointerdown', dragStart);
   sheet.addEventListener('pointermove', dragMove);
@@ -1066,9 +1224,15 @@
   window.EC = {
     api: api, toast: toast, ico: ico, FA: FA, st: st, fmt: fmt, esc: esc, copy: copy, pop: pop, swap: swap, shake: shake,
     animIn: animIn, state: state, closeSheet: closeSheet, openTg: openTg, confirm: askConfirm, haptic: haptic,
-    dateStr: dateStr, dateTime: dateTime, refreshMe: refreshMe,
-    sheet: function (title, html, mount) { state.custom = { title: title, html: html, mount: mount }; openSheet('custom'); },
-    resheet: function (html) { if (state.custom) { state.custom.html = html; var sb = $('.sb', sheet); if (sb) { sb.innerHTML = wrap(state.custom.title, html); if (state.custom.mount) state.custom.mount(sheet); } } }
+    dateStr: dateStr, dateTime: dateTime, refreshMe: refreshMe, tile: tile, ptitle: ptitle, COL: COL, I18N: I, L: L,
+    sheet: function (title, html, mount, icon) { state.custom = { title: title, html: html, mount: mount, icon: icon }; openSheet('custom'); },
+    resheet: function (html) {
+      if (state.custom) {
+        state.custom.html = html;
+        var sb = $('.sb', sheet);
+        if (sb) { sb.innerHTML = wrap(state.custom.title, html, state.custom.icon && state.custom.icon[0], state.custom.icon && state.custom.icon[1]); if (state.custom.mount) state.custom.mount(sheet); }
+      }
+    }
   };
 
   boot();
