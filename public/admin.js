@@ -37,26 +37,7 @@
     broadcast: 'Toplu duyuru', admin_bound: 'Yönetici bağlandı', role_changed: 'Rol değiştirildi', db_saved: 'Veritabanı kaydı düzenlendi', db_deleted: 'Veritabanı kaydı silindi'
   };
 
-  var CSS = '.a-f{display:grid;gap:6px;margin-top:14px}.a-f>label{color:var(--muted);font-size:14px}' +
-    '.a-f input,.a-f textarea,.a-f select{width:100%;min-height:50px;border-radius:16px;border:0;background:var(--surface-2);color:var(--fg);padding:0 16px;font:inherit;font-size:16px;font-weight:700}' +
-    '.a-f textarea{padding:14px 16px;min-height:92px;resize:vertical;line-height:1.4}' +
-    '.a-f input:focus,.a-f textarea:focus,.a-f select:focus{outline:none;background:var(--surface-3)}' +
-    '.a-f select{-webkit-appearance:none;appearance:none}' +
-    '.a-row{display:flex;gap:8px;flex-wrap:wrap}' +
-    '.a-row>button{flex:1 1 110px;min-width:0;height:46px;border-radius:16px;border:0;background:var(--surface-2);font-size:15px}' +
-    '.a-row>button:hover{background:var(--surface-3)}.a-row>button:disabled{opacity:.6;cursor:progress}' +
-    '.a-row>button.pri{background:var(--accent-strong);color:var(--on-accent)}.a-row>button.dan{color:var(--bad)}' +
-    '.a-tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:14px}' +
-    '.a-tile{border-radius:20px;background:var(--surface);padding:16px 14px;display:grid;gap:4px;min-width:0}' +
-    '.a-tile strong{font-size:22px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.a-tile span{color:var(--muted);font-size:13px}' +
-    '.a-bars{display:flex;align-items:flex-end;gap:6px;margin-top:14px}' +
-    '.a-bar{flex:1;display:grid;gap:6px;justify-items:center;min-width:0}.a-bar .p{display:flex;align-items:flex-end;gap:2px;height:96px}' +
-    '.a-bar i{display:block;width:8px;border-radius:4px 4px 2px 2px;background:var(--accent-strong);min-height:3px}.a-bar i.d{background:var(--good)}' +
-    '.a-bar span{font-size:11px;color:var(--muted)}' +
-    '.a-leg{display:flex;gap:16px;margin-top:10px;color:var(--muted);font-size:13px}.a-leg b{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:var(--accent-strong)}.a-leg b.d{background:var(--good)}' +
-    '.a-kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:15px;margin:0}.a-kv dt{color:var(--muted)}.a-kv dd{margin:0;text-align:right;overflow-wrap:anywhere}' +
-    '.a-sec{margin:22px 4px 8px;color:var(--muted);font-size:15px}.a-more{margin-top:12px}.a-gap{margin-top:12px}' +
-    '.a-q{margin-top:14px}.a-q input{text-transform:none;letter-spacing:0}.a-act{cursor:pointer}';
+  /* Not: yönetici sayfasının CSS'i artık ui.css içinde (önbellekli, geç yüklenip kalıp bozmaz, telefonda stil enjeksiyonu yok). */
 
   var esc = function (s) { return EC.esc(s); };
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -245,22 +226,32 @@
     // Elemanlar yeniden yazılmaz, yalnızca aria-pressed değişir: sağa doğru genişleme animasyonu böyle çalışır
     $$('.atab', root).forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-arg') === mod)); });
     setBadge(S.badge);
-    if (scroll) setTimeout(function () {
-      var b = $('.atab[aria-pressed="true"]', root);
-      if (b && b.scrollIntoView) { try { b.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' }); } catch (e) {} }
-    }, 60);
+    if (scroll) followTab();
+  }
+  // Seçili sekme genişlerken sekme çubuğu onu her karede yumuşakça takip eder (smooth scrollIntoView + büyüyen öğe = telefonda takılma yapardı)
+  var followRaf = 0;
+  function followTab() {
+    var nav = $('#adm-tabs', root);
+    if (!nav || nav.scrollWidth <= nav.clientWidth + 2) return;      // bilgisayarda sekmeler sarılır, kaydırma yok
+    cancelAnimationFrame(followRaf);
+    var t0 = performance.now();
+    (function step(t) {
+      var b = $('.atab[aria-pressed="true"]', nav); if (!b) return;
+      var nr = nav.getBoundingClientRect(), br = b.getBoundingClientRect();
+      var want = nav.scrollLeft + (br.left - nr.left) - (nav.clientWidth - br.width) / 2;
+      want = Math.max(0, Math.min(want, nav.scrollWidth - nav.clientWidth));
+      if (t - t0 < 520) { nav.scrollLeft += (want - nav.scrollLeft) * 0.24; followRaf = requestAnimationFrame(step); }
+      else nav.scrollLeft = want;
+    })(t0);
   }
   function mount(viewEl, ec) {
     EC = ec; root = viewEl;
-    if (!document.getElementById('adm-css')) {
-      var st = document.createElement('style'); st.id = 'adm-css'; st.textContent = CSS; document.head.appendChild(st);
-    }
     if (!root.__adm) {
       root.__adm = true;
       root.addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.id === 'adm-q') { e.preventDefault(); act('adm:search'); } });
     }
     root.innerHTML = '<div class="whead"><button class="icon-btn" data-action="nav" data-arg="profile" aria-label="Geri">' + EC.ico('i-back') + '</button>' +
-      EC.ptitle('fa-solid fa-user-shield', 'purple', 'Yönetici', 'in-whead') + '<span class="a-live"><i></i>canlı</span></div>' +
+      EC.ptitle('fa-solid fa-user-shield', 'purple', EC.L('row.admin'), 'in-whead') + '</div>' +
       '<nav class="anav" id="adm-tabs" aria-label="Yönetici sayfaları">' + navHtml() + '</nav><div id="adm-ctl"></div><div id="adm-list"></div>';
     syncNav(true);
     show();
@@ -297,7 +288,7 @@
   function reload() { return refreshCur(M[mod].has() ? 'silent' : 'reset'); }
 
   /* ---------- canlı yenileme: 2,5 sn ---------- */
-  function start() { stop(); timer = setInterval(poll, 2500); }
+  function start() { stop(); timer = setInterval(poll, 4000); }
   function stop() { if (timer) { clearInterval(timer); timer = null; } }
   function poll() {
     if (!root || EC.state.view !== 'admin') { stop(); return; }
@@ -535,7 +526,10 @@
       (cfg.insert ? '<div class="a-row" style="margin-bottom:10px">' + btn('Yeni kayıt', 'db-new', null, 'pri') + '</div>' : '');
     return head + (s.items.length ? '<div class="txl">' + s.items.map(function (row, i) {
       var title = cfg.main.map(function (k) { return row[k]; }).filter(function (x) { return x != null && x !== ''; }).join(' · ') || '—';
-      var sub = cfg.fields.filter(function (f) { return f.list && cfg.main.indexOf(f.k) < 0; }).map(function (f) { return f.l.split(' —')[0] + ': ' + fval(f, row[f.k]); }).join(' · ');
+      var sub = cfg.fields.filter(function (f) { return f.list && cfg.main.indexOf(f.k) < 0; }).map(function (f) {
+        var s = String(fval(f, row[f.k]));
+        return f.l.split(' —')[0] + ': ' + (s.length > 90 ? s.slice(0, 90) + '…' : s);
+      }).join(' · ');
       return '<div class="tx a-act" data-action="adm:db-edit" data-arg="' + i + '" role="button" tabindex="0"><span class="ti" style="color:' + cfg.color + '">' + EC.ico('fa-solid fa-pen') + '</span>' +
         '<div class="tt"><strong>' + esc(title) + '</strong><span>' + esc(sub) + '</span></div></div>';
     }).join('') + '</div>' : '<div class="empty"><h3>Kayıt yok</h3></div>') + moreBtn(s);
@@ -545,7 +539,7 @@
     row = row || {};
     cfg.fields.forEach(function (f) {
       var locked = f.ro || (editing && (f.pk || f.ins));
-      if (locked) { if (editing) ro += '<dt>' + esc(f.l) + '</dt><dd>' + esc(fval(f, row[f.k])) + '</dd>'; return; }
+      if (locked) { if (editing) ro += '<dt>' + esc(f.l.split(' —')[0]) + '</dt><dd>' + esc(fval(f, row[f.k])) + '</dd>'; return; }
       var id = 'db-' + f.k, cur = row[f.k];
       var ctl;
       if (f.opts) ctl = sel(id, f.opts, cur == null ? '' : cur);
@@ -556,7 +550,7 @@
     var idx = editing ? S.db.items.indexOf(row) : -1;
     sheetOf(esc(editing ? cfg.label + ' · düzenle' : cfg.label + ' · yeni kayıt'),
       (ro ? '<dl class="a-kv a-ro">' + ro + '</dl>' : '') + form +
-      '<div class="a-row a-gap">' + btn('Kaydet', 'do-db', idx, 'pri') + (editing && cfg.del ? btn('Sil', 'do-db-del', idx, 'dan') : '') + '</div>' +
+      '<div class="a-row a-gap">' + btn('Kaydet', 'do-db', idx, 'pri') + (editing && cfg.del ? btn(cfg.id === 'translations' ? 'Varsayılana dön' : 'Sil', 'do-db-del', idx, 'dan') : '') + '</div>' +
       (cfg.id === 'app_users' ? '<p class="legal">Rol ve engel değişiklikleri korumalı işlemlerle yapılır (son yönetici ve kendi yöneticiliğin alınamaz).</p>' : ''),
       [cfg.icon.indexOf('fa-') === 0 ? 'fa-solid ' + cfg.icon : cfg.icon, cfg.color]);
   }
@@ -725,7 +719,7 @@
       case 'do-db-del':
         var cfg2 = dbCfg(), row2 = S.db.items[+arg];
         if (!row2) break;
-        EC.confirm('Bu kayıt silinsin mi? Geri alınamaz.', function () {
+        EC.confirm(cfg2.id === 'translations' ? 'Bu çeviri varsayılan metne döndürülsün mü?' : 'Bu kayıt silinsin mi? Geri alınamaz.', function () {
           run(el, EC.api('admin.db_delete', { table: cfg2.id, pk: dbPk(cfg2, row2) })).then(function () { done('Silindi', function () { resetList(S.db); reloadHard(); }); }).catch(quiet);
         });
         break;

@@ -24,6 +24,8 @@
   var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   var EASE = 'cubic-bezier(.22,1,.36,1)';
   var wide = function () { return !!(window.matchMedia && window.matchMedia('(min-width:1024px)').matches); };
+  // Tablet + bilgisayar (≥720px): ürün açılır pencere yerine ayrı detay sayfasında açılır
+  var detailPage = function () { return !!(window.matchMedia && window.matchMedia('(min-width:720px)').matches); };
 
   /* ---------- yumuşak, kalın, renkli ikon kutuları ---------- */
   var COL = { blue: '#5ea1ff', orange: '#ff9f43', green: '#3fd68f', gold: '#f6c244', purple: '#a78bfa', pink: '#ff6fa8', red: '#ff6b6b', teal: '#2dd4bf', cyan: '#38bdf8', slate: '#94a3b8' };
@@ -38,7 +40,7 @@
   function animIn(list) {
     if (reduce) return;
     Array.prototype.forEach.call(list, function (el, i) {
-      if (!el.animate) return;
+      if (i > 11 || !el.animate) return;   // uzun listelerde yalnızca ilk 12 öğe animasyonlanır (telefon takılmasın)
       el.animate(
         [{ opacity: 0, transform: 'translate3d(0,14px,0)' }, { opacity: 1, transform: 'translate3d(0,0,0)' }],
         { duration: 480, delay: Math.min(i, 6) * 40, easing: EASE, fill: 'backwards' }
@@ -276,12 +278,22 @@
       var relang = false, catChanged = false;
       if (r.i18n) { I.setOverrides(r.i18n); relang = true; }
       i18nHash = r.ih;
-      if (r.catalog) { state.products = r.catalog.products || []; catChanged = true; }
+      if (r.catalog) { state.products = r.catalog.products || []; catChanged = true; rememberImages(); }
       catHash = r.ch;
       applySettings(r.settings || {});
       if (!state.booted) return;
-      if (relang) { applyStatic(); if (state.sheet) dirtyView = true; else mount(); }
-      else if (catChanged) { if (state.sheet || state.view !== 'catalog') dirtyView = state.view === 'catalog'; else mount(); }
+      if (relang) {
+        applyStatic();
+        if (state.sheet) dirtyView = true;
+        else if (state.view === 'admin') { /* yönetici sayfası yeniden kurulmaz: yazdığın form bozulmasın */ }
+        else if (state.view === 'product') refreshProductPage();
+        else mount();
+      }
+      else if (catChanged) {
+        if (state.view === 'product') refreshProductPage();
+        else if (state.sheet || state.view !== 'catalog') dirtyView = state.view === 'catalog';
+        else mount();
+      }
       else if (sig !== sigMe()) repaint();
     }, function () { refreshing = false; });
   }
@@ -297,6 +309,7 @@
     var v = state.view;
     if (v === 'purchases') { var pl = $('#plist'); if (pl) pl.innerHTML = listHtml(); updateCounts(); }
     else if (v === 'profile') { var b = $('#bal-num'); if (b) b.textContent = fmt(state.balance); }
+    else if (v === 'product') { updatePayState(); }
     else if (v === 'wallet') {
       var wb = $('#w-bal'); if (wb) wb.textContent = fmt(state.balance);
       var tl = $('#tx-list'); if (tl) tl.innerHTML = txListHtml();
@@ -364,6 +377,25 @@
         '<div class="empty cat-item">' + ico('i-star') + '<h3>' + esc(L('cat.empty.t')) + '</h3><p>' + esc(L('cat.empty.p')) + '</p></div>');
   }
 
+  /* ---------- ürün görselleri (satın alımlarda gösterilir; gizlenen ürünler için cihazda hatırlanır) ---------- */
+  var IMGK = 'eac-pimg';
+  function imgMap() { try { return JSON.parse(lsGet(IMGK) || '{}') || {}; } catch (e) { return {}; } }
+  function rememberImages() {
+    var m = imgMap(), ch = false;
+    state.products.forEach(function (p) { if (p.image_url && m[p.name] !== p.image_url) { m[p.name] = p.image_url; ch = true; } });
+    if (ch) lsSet(IMGK, JSON.stringify(m));
+  }
+  function orderImg(o) {
+    if (o.image_url) return o.image_url;
+    var pr = state.products.filter(function (x) { return (o.product_id && x.id === o.product_id) || x.name === o.product_name; })[0];
+    return (pr && pr.image_url) || imgMap()[o.product_name] || '';
+  }
+  function thumbHtml(o) {
+    var u = orderImg(o);
+    return '<div class="thumb"><i class="fa-solid fa-gamepad" aria-hidden="true"></i>' +
+      (u ? '<img src="' + esc(u) + '" alt="" loading="lazy" decoding="async" draggable="false" onerror="this.remove()">' : '') + '</div>';
+  }
+
   /* ---------- satın alımlar ---------- */
   function buyCard(p) {
     var pill = p.status === 'completed' ? '<span class="pill on">' + esc(L('st.active')) + '</span>'
@@ -382,7 +414,7 @@
     } else {
       body = '<p class="muted">' + esc(L('buy.refunded_text')) + (p.admin_note ? ' ' + esc(p.admin_note) : '') + '</p>';
     }
-    return '<article class="buy" data-id="' + p.id + '"><div class="buy-top"><div class="thumb">' + artFlow(true) + '</div>' +
+    return '<article class="buy" data-id="' + p.id + '"><div class="buy-top">' + thumbHtml(p) +
       '<div class="buy-info"><h3>' + esc(p.product_name) + '</h3><p><span>' + esc(p.tariff_label) + '</span><span>·</span>' + st(p.price) + '<span>·</span><span>' + dateStr(p.created_at) + '</span></p></div>' + pill + '</div>' + body + '</article>';
   }
   function filtered() {
@@ -438,7 +470,7 @@
   }
   function profileView() {
     var u = state.me || {};
-    var adminRow = state.admin ? rowBtn('nav', 'admin', 'fa-solid fa-user-shield', 'purple', L('row.admin'), L('row.admin.s')) : '';
+    var adminRow = state.admin ? rowBtn('nav', 'admin', 'fa-solid fa-user-shield', 'purple', L('row.admin')) : '';
     return ptitle('fa-solid fa-user', 'blue', L('pro.title')) + maintBanner() +
       '<div class="pf"><div class="pf-a">' +
       '<section class="pro"><div class="pro-top">' + avatarHtml() + '<div style="min-width:0"><h2>' + esc(fullName()) + '</h2><p>' + (u.username ? '@' + esc(u.username) : 'ID: ' + esc(u.id)) + '</p></div></div>' +
@@ -593,7 +625,7 @@
 
   /* ---------- sayfa yükleme / yönlendirme ---------- */
   function setDock() {
-    var cur = (state.view === 'wallet' || state.view === 'admin') ? 'profile' : state.view;
+    var cur = (state.view === 'wallet' || state.view === 'admin') ? 'profile' : state.view === 'product' ? 'catalog' : state.view;
     ['purchases', 'catalog', 'profile'].forEach(function (id) {
       var b = $('#tab-' + id);
       if (id === cur) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
@@ -620,7 +652,7 @@
     if (!adminPromise) {
       adminPromise = new Promise(function (res, rej) {
         var s = document.createElement('script');
-        s.src = '/admin.js?v=2'; s.onload = res; s.onerror = function () { adminPromise = null; rej(new Error('admin_load')); };
+        s.src = '/admin.js?v=3'; s.onload = res; s.onerror = function () { adminPromise = null; rej(new Error('admin_load')); };
         document.head.appendChild(s);
       });
     }
@@ -638,6 +670,7 @@
       syncBack();
       return;
     }
+    if (v === 'product') { mountProduct(); syncBack(); return; }
     view.innerHTML = v === 'purchases' ? purchasesView() : v === 'profile' ? profileView() : v === 'wallet' ? walletView() : catalogView();
     animIn(view.children);
     if (v === 'purchases') animIn($('#plist').children);
@@ -647,13 +680,28 @@
     syncBack();
     if (state.booted && v !== 'catalog') refreshMe();
   }
+  function hashParts() {
+    var p = location.hash.replace('#', '').split('/'), id = '';
+    try { id = decodeURIComponent(p[1] || ''); } catch (e) {}
+    return { v: p[0], id: id };
+  }
   function route(first) {
     if (!state.booted) return;
-    var h = location.hash.replace('#', '');
-    var v = ['catalog', 'purchases', 'profile', 'wallet', 'admin'].indexOf(h) > -1 ? h : 'catalog';
+    var hp = hashParts();
+    var v = ['catalog', 'purchases', 'profile', 'wallet', 'admin', 'product'].indexOf(hp.v) > -1 ? hp.v : 'catalog';
     if (v === 'admin' && !state.admin) v = 'catalog';
+    var pid = '';
+    if (v === 'product') {
+      var pr = state.products.filter(function (x) { return x.id === hp.id; })[0];
+      // Ürün sayfası yalnızca tablet/PC'de var; telefonda ya da ürün kalmadıysa kataloğa dön
+      if (pr && detailPage()) pid = pr.id;
+      else { v = 'catalog'; try { history.replaceState(null, '', '#catalog'); } catch (e) {} }
+    }
+    var newProduct = v === 'product' && (state.view !== 'product' || state.product !== pid);
+    if (state.view === 'product' && v !== 'product') { state.paid = null; state.paying = false; if (cancelTotal) cancelTotal(); }
+    if (newProduct) enterProduct(pid);
     if (first) { state.view = v; setDock(); mount(); return; }
-    if (v === state.view) { window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' }); return; }
+    if (v === state.view && !newProduct) { window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' }); return; }
     state.view = v; setDock();
     mount(); window.scrollTo(0, 0);
   }
@@ -680,16 +728,17 @@
     return L(low ? 'p.bal_low' : 'p.bal', { amt: st(state.balance) });
   }
   function updatePayState() {
-    var c = $('#paycard', sheet); if (!c) return;
+    var h = host();
+    var c = $('#paycard', h); if (!c) return;
     var isLow = priceNow() > state.balance;
     c.classList.toggle('low', isLow);
-    var tw = $('#topup-wrap', sheet);
+    var tw = $('#topup-wrap', h);
     if (tw) { tw.classList.toggle('open', isLow); tw.inert = !isLow; }
-    if (isLow) { var tb = $('#topup-btn', sheet); if (tb) tb.innerHTML = shortBtn(); }
-    $('#paynote', sheet).innerHTML = payNote();
+    if (isLow) { var tb = $('#topup-btn', h); if (tb) tb.innerHTML = shortBtn(); }
+    var pn = $('#paynote', h); if (pn) pn.innerHTML = payNote();
   }
   function updateTotal(animate) {
-    var nums = $$('[data-num]', sheet);
+    var nums = $$('[data-num]', host());
     if (!nums.length) return;
     var to = priceNow(), from = shown;
     var set = function (v) { shown = v; var s = fmt(v); nums.forEach(function (n) { n.textContent = s; }); };
@@ -712,18 +761,132 @@
   function applyPromo(code) {
     var tid = state.tariff;
     return api('quote', { tariff_id: tid, code: code }).then(function (q) {
-      if (state.tariff !== tid || state.sheet !== 'product') return;
+      if (state.tariff !== tid || !inProduct()) return;
       state.quote = q; state.promoCode = q.promo_code || '';
       setPmsg(true, L('p.promo.ok', { n: fmt(q.discount) }));
       updateTotal(true);
     }, function (e) {
-      if (state.tariff !== tid || state.sheet !== 'product') return;
+      if (state.tariff !== tid || !inProduct()) return;
       state.quote = null; state.promoCode = '';
       setPmsg(false, e.message || L('p.promo.bad'));
       var pin = $('#promo-input'); if (pin) shake(pin);
       updateTotal(true);
     });
   }
+  /* ---------- ürün detay sayfası (tablet + bilgisayar) — telefonda alt sayfa (sheet) kullanılır ---------- */
+  // Ürün arayüzü ya alt sayfada ya da sayfa içinde durur; ortak mantık doğru kabı seçer.
+  function host() { return state.sheet === 'product' ? sheet : view; }
+  function inProduct() { return state.sheet === 'product' || state.view === 'product'; }
+  function tariffButtons(p) {
+    return p.tariffs.map(function (x) {
+      return '<button class="tariff" data-action="tariff" data-arg="' + esc(x.id) + '" aria-pressed="' + (x.id === state.tariff) + '">' +
+        (x.tag ? '<span class="tag">' + esc(x.tag) + '</span>' : '') + '<strong>' + esc(x.label) + '</strong><span class="price">' + st(x.price) + '</span></button>';
+    }).join('');
+  }
+  // Ödeme yöntemi + bakiye + promosyon kodu + toplam + Öde düğmesi
+  function payBlock() {
+    var low = priceNow() > state.balance;
+    return '<p class="label">' + esc(L('p.paywith')) + '</p>' +
+      '<div class="paycard' + (low ? ' low' : '') + '" id="paycard"><span class="pc-ico">' + STAR + '</span>' +
+      '<div class="pc-txt"><strong>' + esc(L('p.stars')) + '</strong><span id="paynote">' + payNote() + '</span></div>' +
+      '<span class="pc-tick">' + ico('i-check') + '</span></div>' +
+      '<div class="collapse' + (low ? ' open' : '') + '" id="topup-wrap"' + (low ? '' : ' inert') + '><div class="inner"><button class="btn-ghost topup-btn" id="topup-btn" data-action="to-wallet-need">' + shortBtn() + '</button></div></div>' +
+      '<div class="collapse open" id="promo-link-wrap"><div class="inner"><button class="link" data-action="toggle-promo">' + esc(L('p.promo.q')) + '</button></div></div>' +
+      '<div class="collapse" id="promo-wrap"><div class="inner"><div class="promo"><input id="promo-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" placeholder="' + esc(L('p.promo.ph')) + '" aria-label="' + esc(L('p.promo.ph')) + '"><button data-action="apply-promo">' + esc(L('p.promo.apply')) + '</button></div><p class="pmsg" id="pmsg"></p></div></div>' +
+      '<div class="total"><span>' + esc(L('p.total')) + '</span><strong><span class="num" data-num>0</span>' + STAR + '</strong></div>' +
+      '<div class="paybar">' +
+      '<div class="pay"><button class="btn" id="pay-btn" data-action="pay"><span class="lbl">' + esc(L('p.pay')) + ' <span class="num" data-num>0</span>' + STAR + '</span><span class="wait">' + ico('i-spin') + esc(L('w.processing')) + '</span></button></div></div>';
+  }
+  // Benzer yazılımlar: aynı kategori (game) varsa onlar, yoksa başka ne ürün varsa
+  function similarProducts(p) {
+    var g = String(p.game || '').trim().toLowerCase();
+    var others = state.products.filter(function (x) { return x.id !== p.id; });
+    var same = g ? others.filter(function (x) { return String(x.game || '').trim().toLowerCase() === g; }) : [];
+    return same.length ? same : others;
+  }
+  function similarHtml(p) {
+    var list = similarProducts(p);
+    if (!list.length) return '';
+    return '<section class="sim" id="sim"><div class="sim-head"><h2>' + esc(L('p.similar')) + '</h2><div class="sim-nav">' +
+      '<button class="icon-btn" data-action="sim-prev" aria-label="' + esc(L('sim.prev')) + '">' + ico('i-back') + '</button>' +
+      '<button class="icon-btn" data-action="sim-next" aria-label="' + esc(L('sim.next')) + '">' + ico('i-chev') + '</button></div></div>' +
+      '<div class="sim-row" id="sim-row">' + list.map(productCard).join('') + '</div></section>';
+  }
+  function simState() {
+    var r = $('#sim-row'); if (!r) return;
+    var pv = $('[data-action="sim-prev"]'), nx = $('[data-action="sim-next"]'), nav = $('.sim-nav');
+    if (pv) pv.disabled = r.scrollLeft <= 4;
+    if (nx) nx.disabled = r.scrollLeft + r.clientWidth >= r.scrollWidth - 4;
+    if (nav) nav.style.visibility = r.scrollWidth > r.clientWidth + 4 ? '' : 'hidden';
+  }
+  function initSim() {
+    var r = $('#sim-row'); if (!r) return;
+    r.addEventListener('scroll', simState, { passive: true });
+    simState(); setTimeout(simState, 400);
+  }
+  function productPage() {
+    var p = product();
+    var bar = '<div class="pp-bar"><button class="icon-btn" data-action="nav" data-arg="catalog" aria-label="' + esc(L('back')) + '">' + ico('i-back') + '</button><span class="pp-crumb">' + esc(L('nav.catalog')) + '</span></div>';
+    if (!p) return '<div class="pp">' + bar + '<div class="empty"><h3>' + esc(L('p.notfound')) + '</h3></div></div>';
+    if (state.paid) {
+      var o = state.paid, notice = state.settings.order_notice || L('p.paid.notice');
+      return '<div class="pp">' + bar + '<div class="pp-done"><div class="done"><div class="ok">' + ico('i-check') + '</div><h3>' + esc(L('p.paid.h')) + '</h3>' +
+        '<p>' + esc(notice) + '</p><p>#' + o.id + ' · ' + esc(o.product_name) + ' · ' + esc(o.tariff_label) + '</p>' +
+        '<p>' + L('p.paid.left', { amt: st(state.balance) }) + '</p>' +
+        '<button class="btn" data-action="goto-purchases"><span class="lbl">' + esc(L('p.paid.open')) + '</span></button></div></div></div>';
+    }
+    var pre = L('card.pre'), post = L('card.post');
+    var meta = (p.game ? '<span class="pp-chip">' + ico('i-game') + esc(p.game) + '</span>' : '') +
+      '<span class="pp-chip">' + (pre ? esc(pre) : '') + st(minPrice(p)) + (post ? ' ' + esc(post) : '') + '</span>';
+    return '<div class="pp">' + bar +
+      '<div class="pp-hero">' + (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="' + esc(p.name) + '" decoding="async" draggable="false">' : artFlow(true)) + '</div>' +
+      '<h1 class="pp-name">' + esc(p.name) + '</h1>' +
+      '<div class="pp-meta">' + meta + '</div>' +
+      (p.description ? '<p class="pp-desc">' + esc(p.description) + '</p>' : '') +
+      '<p class="label">' + esc(L('p.plan')) + '</p><div class="tariffs">' + tariffButtons(p) + '</div>' +
+      '<div class="info"><div><h4>' + esc(L('p.how.h')) + '</h4><p>' + esc(L('p.how.t')) + '</p></div><div id="lic">' + licHtml() + '</div></div>' +
+      '<section class="pp-buy">' + payBlock() + '<p class="legal">' + esc(L('p.legal')) + '</p></section>' +
+      similarHtml(p) + '</div>';
+  }
+  function mountProduct() {
+    view.innerHTML = productPage();
+    animIn($$('.pp > *', view));
+    watchArt(view);
+    if (state.paid) return;
+    updateTotal(true);
+    var rs = state.buyRestore; state.buyRestore = null;   // cüzdandan dönünce promosyon kodu geri gelir
+    if (rs && rs.code) {
+      var pl = $('#promo-link-wrap'), pw = $('#promo-wrap'), pin0 = $('#promo-input');
+      if (pl) pl.classList.remove('open');
+      if (pw) pw.classList.add('open');
+      if (pin0) pin0.value = rs.code;
+      applyPromo(rs.code);
+    }
+    initSim();
+  }
+  // Katalog (fiyat/tarife) değişince sayfayı baştan kurmadan yalnızca ilgili kısımları günceller
+  function refreshProductPage() {
+    if (state.view !== 'product' || state.paid) return;
+    var p = product();
+    if (!p) { location.hash = 'catalog'; return; }
+    if (!p.tariffs.some(function (x) { return x.id === state.tariff; })) { state.tariff = defaultTariff(p); state.quote = null; }
+    var t = $('.pp .tariffs', view); if (t) t.innerHTML = tariffButtons(p);
+    var lic = $('#lic', view); if (lic) lic.innerHTML = licHtml();
+    updateTotal(false);
+    var simEl = $('#sim', view), sh = similarHtml(p);
+    if (simEl) { if (sh) simEl.outerHTML = sh; else simEl.remove(); }
+    else if (sh) { var pp = $('.pp', view); if (pp) pp.insertAdjacentHTML('beforeend', sh); }
+    initSim();
+  }
+  function enterProduct(pid) {
+    var p = state.products.filter(function (x) { return x.id === pid; })[0];
+    var rs = state.buyRestore;
+    state.product = pid;
+    state.tariff = (rs && rs.productId === pid && p && p.tariffs.some(function (t) { return t.id === rs.tariffId; })) ? rs.tariffId : (p ? defaultTariff(p) : null);
+    state.paid = null; state.paying = false; state.quote = null; state.promoCode = ''; shown = 0;
+    if (cancelTotal) cancelTotal();
+  }
+
   function productSheet() {
     var p = product();
     if (!p) return '<div class="grab"></div><div class="empty"><h3>' + esc(L('p.notfound')) + '</h3></div>';
@@ -736,27 +899,14 @@
         '<p>' + L('p.paid.left', { amt: st(state.balance) }) + '</p>' +
         '<button class="btn" data-action="goto-purchases"><span class="lbl">' + esc(L('p.paid.open')) + '</span></button></div>';
     }
-    var tar = p.tariffs.map(function (x) {
-      return '<button class="tariff" data-action="tariff" data-arg="' + esc(x.id) + '" aria-pressed="' + (x.id === state.tariff) + '">' +
-        (x.tag ? '<span class="tag">' + esc(x.tag) + '</span>' : '') + '<strong>' + esc(x.label) + '</strong><span class="price">' + st(x.price) + '</span></button>';
-    }).join('');
-    var low = priceNow() > state.balance;
+    var tar = tariffButtons(p);
     return '<div class="grab"></div>' +
       '<div class="phero">' + (p.image_url ? '<img class="pcard-img" src="' + esc(p.image_url) + '" alt="' + esc(p.name) + '" decoding="async" draggable="false">' : artFlow(true)) + '</div>' +
       '<h2 class="sh-name">' + esc(p.name) + '</h2>' +
       '<p class="sh-desc">' + esc(p.description) + '</p>' +
       '<p class="label">' + esc(L('p.plan')) + '</p><div class="tariffs">' + tar + '</div>' +
       '<div class="info"><div><h4>' + esc(L('p.how.h')) + '</h4><p>' + esc(L('p.how.t')) + '</p></div><div id="lic">' + licHtml() + '</div></div>' +
-      '<p class="label">' + esc(L('p.paywith')) + '</p>' +
-      '<div class="paycard' + (low ? ' low' : '') + '" id="paycard"><span class="pc-ico">' + STAR + '</span>' +
-      '<div class="pc-txt"><strong>' + esc(L('p.stars')) + '</strong><span id="paynote">' + payNote() + '</span></div>' +
-      '<span class="pc-tick">' + ico('i-check') + '</span></div>' +
-      '<div class="collapse' + (low ? ' open' : '') + '" id="topup-wrap"' + (low ? '' : ' inert') + '><div class="inner"><button class="btn-ghost topup-btn" id="topup-btn" data-action="to-wallet-need">' + shortBtn() + '</button></div></div>' +
-      '<div class="collapse open" id="promo-link-wrap"><div class="inner"><button class="link" data-action="toggle-promo">' + esc(L('p.promo.q')) + '</button></div></div>' +
-      '<div class="collapse" id="promo-wrap"><div class="inner"><div class="promo"><input id="promo-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="32" placeholder="' + esc(L('p.promo.ph')) + '" aria-label="' + esc(L('p.promo.ph')) + '"><button data-action="apply-promo">' + esc(L('p.promo.apply')) + '</button></div><p class="pmsg" id="pmsg"></p></div></div>' +
-      '<div class="total"><span>' + esc(L('p.total')) + '</span><strong><span class="num" data-num>0</span>' + STAR + '</strong></div>' +
-      '<div class="paybar">' +
-      '<div class="pay"><button class="btn" id="pay-btn" data-action="pay"><span class="lbl">' + esc(L('p.pay')) + ' <span class="num" data-num>0</span>' + STAR + '</span><span class="wait">' + ico('i-spin') + esc(L('w.processing')) + '</span></button></div></div>' +
+      payBlock() +
       '<p class="legal">' + esc(L('p.legal')) + '</p>';
   }
 
@@ -871,7 +1021,7 @@
     if (lastFocus && lastFocus.focus) { try { lastFocus.focus({ preventScroll: true }); } catch (e) {} }
     lastFocus = null;
     syncBack();
-    if (dirtyView) { dirtyView = false; if (state.booted && state.view !== 'wallet' && state.view !== 'admin') mount(); }
+    if (dirtyView) { dirtyView = false; if (state.booted && state.view !== 'wallet' && state.view !== 'admin' && state.view !== 'product') mount(); }
   }
 
   /* ---------- yukarıdan aşağı çekerek kapatma (yalnızca telefon/tablet) ---------- */
@@ -1018,6 +1168,7 @@
       if (d.banned) { renderGate('banned', d.reason); return; }
       state.settings = d.settings || {};
       state.products = (d.catalog && d.catalog.products) || [];
+      rememberImages();
       state.invite = d.invite_link || null; state.bot = d.bot || null;
       I.setOverrides(d.i18n); catHash = d.ch; i18nHash = d.ih;
       applyMe(d.me);
@@ -1067,6 +1218,8 @@
       case 'back-to-buy':
         var keep = state.need;
         state.need = null;
+        // Tablet/PC: ayrı ürün sayfasına dön (tarife + promosyon kodu geri gelir)
+        if (detailPage() && keep) { state.buyRestore = keep; location.hash = 'product/' + keep.productId; break; }
         var reopen = function () {
           if (keep) { state.product = keep.productId; state.tariff = keep.tariffId; }
           openSheet('product');
@@ -1083,8 +1236,19 @@
       case 'open-product':
         var pr = state.products.filter(function (x) { return x.id === arg; })[0];
         if (!pr) break;
+        if (detailPage()) {
+          // Tablet/PC: modal açılmaz, ürün kendi sayfasında açılır
+          closeSheet();
+          location.hash = 'product/' + pr.id;
+          break;
+        }
         state.product = pr.id; state.tariff = defaultTariff(pr);
         openSheet('product');
+        break;
+      case 'sim-prev':
+      case 'sim-next':
+        var srow = $('#sim-row');
+        if (srow) srow.scrollBy({ left: (name === 'sim-prev' ? -1 : 1) * Math.round(srow.clientWidth * 0.8), behavior: reduce ? 'auto' : 'smooth' });
         break;
       case 'open-support': openSheet('support'); break;
       case 'support-chat': openTg('https://t.me/' + supportName()); break;
@@ -1122,8 +1286,8 @@
         break;
       case 'tariff':
         state.tariff = arg; state.quote = null;
-        $$('.tariff', sheet).forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-arg') === arg)); });
-        var lic = $('#lic', sheet); lic.innerHTML = licHtml(); swap(lic);
+        $$('.tariff', host()).forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-arg') === arg)); });
+        var lic = $('#lic', host()); if (lic) { lic.innerHTML = licHtml(); swap(lic); }
         updateTotal(true);
         if (state.promoCode) applyPromo(state.promoCode);
         break;
@@ -1148,10 +1312,15 @@
         if (state.promoCode) body.code = state.promoCode;
         api('order', body).then(function (r) {
           applyMe(r.me); haptic('success');
-          if (state.sheet !== 'product') { toast(L('p.t_ok')); repaint(); return; }
+          if (!inProduct()) { toast(L('p.t_ok')); repaint(); return; }
           state.paying = false; state.paid = r.order;
-          renderSheet();
-          sheet.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+          if (state.sheet === 'product') {
+            renderSheet();
+            sheet.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+          } else {
+            mountProduct();
+            window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+          }
         }, function (e) {
           state.paying = false;
           var b = $('#pay-btn'); if (b) { b.classList.remove('busy'); b.disabled = false; }
@@ -1207,8 +1376,38 @@
   });
   // Uygulama öne gelince: hemen yenile + bildirimler "görüldü" say
   document.addEventListener('visibilitychange', function () { if (!document.hidden) { refreshMe(); markSeen(); } });
-  // Canlı veri: 3 sn'de bir (yalnızca ekran açıkken) bakiye, sipariş, bildirim, ayar ve katalog yenilenir
-  setInterval(function () { if (!document.hidden) refreshMe(); }, 3000);
+  // Canlı veri: 3 sn'de bir (yalnızca ekran açıkken) bakiye, sipariş, bildirim, ayar ve katalog yenilenir.
+  // Yönetici sayfasında kendi yenilemesi var; burada 9 sn'de bir bakmak yeter (telefon takilmasin).
+  var pollTick = 0;
+  setInterval(function () {
+    if (document.hidden) return;
+    if (state.view === 'admin' && (++pollTick % 3)) return;
+    refreshMe();
+  }, 3000);
+  // Telefonda klavye açılınca alt sayfadaki alan görünür kalsın
+  document.addEventListener('focusin', function (e) {
+    var t = e.target;
+    if (!t || !t.tagName || wide() || !sheet.contains(t) || !/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+    setTimeout(function () { try { t.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' }); } catch (err) {} }, 320);
+  });
+  // Ekran boyutu telefon ↔ tablet/PC arası değişirse ürün doğru biçimde (sayfa / alt sayfa) açılsın
+  var rzT;
+  window.addEventListener('resize', function () {
+    clearTimeout(rzT);
+    rzT = setTimeout(function () {
+      if (!state.booted) return;
+      if (state.view === 'product' && !detailPage()) {
+        var back = state.product;
+        location.hash = 'catalog';
+        setTimeout(function () { act('open-product', back); }, 150);
+      } else if (state.sheet === 'product' && detailPage()) {
+        var pid = state.product;
+        closeSheet();
+        location.hash = 'product/' + pid;
+      }
+      simState();
+    }, 160);
+  });
   scrim.addEventListener('click', closeSheet);
   sheet.addEventListener('pointerdown', dragStart);
   sheet.addEventListener('pointermove', dragMove);
